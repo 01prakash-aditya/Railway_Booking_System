@@ -457,6 +457,320 @@ BEGIN
 END$$
 DELIMITER ;
 
+drop procedure sp_BookTicket1;
+
+DELIMITER $$
+
+CREATE PROCEDURE sp_BookTicket1(
+    IN p_UserID INT,
+    IN p_TrainID INT,
+    IN p_ScheduleID INT,
+    IN p_FromStation VARCHAR(50),
+    IN p_ToStation VARCHAR(50),
+    IN p_JourneyDate DATE,
+    IN p_CoachType VARCHAR(10),
+    IN p_PassengerName VARCHAR(50),
+    IN p_PassengerAge INT,
+    IN p_PassengerGender CHAR(1),
+    IN p_PaymentMethod VARCHAR(20),
+    IN p_PaymentID INT,
+    OUT p_PNR VARCHAR(20),
+    OUT p_TicketID INT
+)
+BEGIN
+    DECLARE v_TotalSeats INT;
+    DECLARE v_ConfirmedLimit INT;
+    DECLARE v_RACLimit INT;
+    DECLARE v_BookedConfirmed INT;
+    DECLARE v_BookedRAC INT;
+    DECLARE v_WLCount INT;
+    DECLARE v_Fare DECIMAL(10,2);
+    DECLARE v_WalletBalance DECIMAL(10,2);
+    DECLARE v_FromDistance INT;
+    DECLARE v_ToDistance INT;
+    DECLARE v_Distance INT;
+    DECLARE v_BookingStatus VARCHAR(20);
+    DECLARE v_SeatAllocation VARCHAR(50);
+    DECLARE v_RACSeatNo INT;
+
+    START TRANSACTION;
+
+    -- Get total seats in the coach
+    SELECT TotalSeats INTO v_TotalSeats
+    FROM Coaches
+    WHERE TrainID = p_TrainID AND CoachType = p_CoachType
+    LIMIT 1;
+
+    SET v_ConfirmedLimit = FLOOR(v_TotalSeats * 0.8);
+    SET v_RACLimit = (v_TotalSeats - v_ConfirmedLimit) * 2;
+
+    -- Count confirmed bookings
+    SELECT COUNT(*) INTO v_BookedConfirmed
+    FROM Passengers p
+    JOIN Tickets t ON p.TicketID = t.TicketID
+    WHERE t.TrainID = p_TrainID AND t.ScheduleID = p_ScheduleID
+      AND p.CoachType = p_CoachType AND p.BookingStatus = 'confirmed'
+      AND t.JourneyDate = p_JourneyDate;
+
+    -- Count RAC bookings
+    SELECT COUNT(*) INTO v_BookedRAC
+    FROM Passengers p
+    JOIN Tickets t ON p.TicketID = t.TicketID
+    WHERE t.TrainID = p_TrainID AND t.ScheduleID = p_ScheduleID
+      AND p.CoachType = p_CoachType AND p.BookingStatus = 'RAC'
+      AND t.JourneyDate = p_JourneyDate;
+
+    -- Count WL bookings
+    SELECT COUNT(*) INTO v_WLCount
+    FROM Passengers p
+    JOIN Tickets t ON p.TicketID = t.TicketID
+    WHERE t.TrainID = p_TrainID AND t.ScheduleID = p_ScheduleID
+      AND p.CoachType = p_CoachType AND p.BookingStatus = 'WL'
+      AND t.JourneyDate = p_JourneyDate;
+
+    -- Calculate fare
+    SELECT Distance INTO v_FromDistance FROM TrainStops
+    WHERE ScheduleID = p_ScheduleID AND StationName = p_FromStation;
+
+    SELECT Distance INTO v_ToDistance FROM TrainStops
+    WHERE ScheduleID = p_ScheduleID AND StationName = p_ToStation;
+
+    SET v_Distance = v_ToDistance - v_FromDistance;
+
+    SELECT ROUND(BaseFare * v_Distance / 100, 2) INTO v_Fare
+    FROM Coaches WHERE TrainID = p_TrainID AND CoachType = p_CoachType LIMIT 1;
+
+    -- Wallet balance check
+    IF p_PaymentMethod = 'wallet' THEN
+        SELECT Balance INTO v_WalletBalance FROM EWallet WHERE UserID = p_UserID;
+        IF v_WalletBalance < v_Fare THEN
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Insufficient wallet balance';
+        END IF;
+    END IF;
+
+    -- Generate PNR
+    SET p_PNR = CONCAT('PNR', LPAD(p_TrainID, 4, '0'), DATE_FORMAT(NOW(), '%d%m%y'), LPAD(FLOOR(RAND() * 10000), 4, '0'));
+
+    -- Insert ticket
+    INSERT INTO Tickets (
+        PNR, UserID, TrainID, ScheduleID, FromStation, ToStation,
+        BookingDate, JourneyDate, TotalPassengers, TotalFare,
+        PaymentMethod, PaymentID, BookingStatus
+    ) VALUES (
+        p_PNR, p_UserID, p_TrainID, p_ScheduleID, p_FromStation, p_ToStation,
+        NOW(), p_JourneyDate, 1, v_Fare,
+        p_PaymentMethod, p_PaymentID, 'confirmed'
+    );
+
+    SET p_TicketID = LAST_INSERT_ID();
+
+    -- Booking logic
+    IF v_BookedConfirmed < v_ConfirmedLimit THEN
+        SET v_BookingStatus = 'confirmed';
+        SET v_SeatAllocation = CONCAT(p_CoachType, '-', v_BookedConfirmed + 1);
+
+        UPDATE Coaches
+        SET AvailableSeats = AvailableSeats - 1
+        WHERE TrainID = p_TrainID AND CoachType = p_CoachType;
+
+    ELSEIF v_BookedRAC < v_RACLimit THEN
+        SET v_BookingStatus = 'RAC';
+        SET v_RACSeatNo = FLOOR(v_BookedRAC / 2) + v_ConfirmedLimit + 1;
+        SET v_SeatAllocation = CONCAT('RAC ', v_BookedRAC + 1, ' (', p_CoachType, '-', v_RACSeatNo, ')');
+
+    ELSE
+        IF v_WLCount >= 10 THEN
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'REGRET';
+        END IF;
+        SET v_BookingStatus = 'WL';
+        SET v_SeatAllocation = CONCAT('WL ', v_WLCount + 1);
+    END IF;
+
+    -- Insert passenger
+    INSERT INTO Passengers (
+        TicketID, Name, Age, Gender, CoachType, SeatAllocation, BookingStatus
+    )
+    VALUES (
+        p_TicketID, p_PassengerName, p_PassengerAge, p_PassengerGender,
+        p_CoachType, v_SeatAllocation, v_BookingStatus
+    );
+
+    -- Log transaction
+    INSERT INTO Transactions (
+        TicketID, UserID, Amount, TransactionType, TransactionDate,
+        PaymentMethod, PaymentStatus, Remarks
+    )
+    VALUES (
+        p_TicketID, p_UserID, v_Fare, 'booking', NOW(),
+        p_PaymentMethod, 'confirmed', CONCAT('1 Passenger Booking - ', v_BookingStatus)
+    );
+
+    COMMIT;
+END$$
+
+DELIMITER ;
+
+-- NEW
+
+DELIMITER $$
+
+CREATE PROCEDURE sp_BookTicket1(
+    IN p_UserID INT,
+    IN p_TrainID INT,
+    IN p_ScheduleID INT,
+    IN p_FromStation VARCHAR(50),
+    IN p_ToStation VARCHAR(50),
+    IN p_JourneyDate DATE,
+    IN p_CoachType VARCHAR(10),
+    IN p_PassengerName VARCHAR(50),
+    IN p_PassengerAge INT,
+    IN p_PassengerGender CHAR(1),
+    IN p_PaymentMethod VARCHAR(20),
+    IN p_PaymentID INT,
+    OUT p_PNR VARCHAR(20),
+    OUT p_TicketID INT
+)
+BEGIN
+    DECLARE v_TotalSeats INT;
+    DECLARE v_BookedConfirmed INT;
+    DECLARE v_BookedRAC INT;
+    DECLARE v_WLCount INT;
+    DECLARE v_Fare DECIMAL(10,2);
+    DECLARE v_WalletBalance DECIMAL(10,2);
+    DECLARE v_FromDistance INT;
+    DECLARE v_ToDistance INT;
+    DECLARE v_Distance INT;
+    DECLARE v_BookingStatus VARCHAR(20);
+    DECLARE v_SeatAllocation VARCHAR(20);
+    DECLARE v_RACSeatNo INT;
+
+    START TRANSACTION;
+
+    -- Get total seats in the coach
+    SELECT TotalSeats INTO v_TotalSeats
+    FROM Coaches
+    WHERE TrainID = p_TrainID AND CoachType = p_CoachType
+    LIMIT 1;
+
+    -- Count confirmed bookings
+    SELECT COUNT(*) INTO v_BookedConfirmed
+    FROM Passengers p
+    JOIN Tickets t ON p.TicketID = t.TicketID
+    WHERE t.TrainID = p_TrainID
+      AND t.ScheduleID = p_ScheduleID
+      AND p.CoachType = p_CoachType
+      AND p.BookingStatus = 'confirmed'
+      AND t.JourneyDate = p_JourneyDate;
+
+    -- Count RAC bookings
+    SELECT COUNT(*) INTO v_BookedRAC
+    FROM Passengers p
+    JOIN Tickets t ON p.TicketID = t.TicketID
+    WHERE t.TrainID = p_TrainID
+      AND t.ScheduleID = p_ScheduleID
+      AND p.CoachType = p_CoachType
+      AND p.BookingStatus = 'RAC'
+      AND t.JourneyDate = p_JourneyDate;
+
+    -- Count WL bookings
+    SELECT COUNT(*) INTO v_WLCount
+    FROM Passengers p
+    JOIN Tickets t ON p.TicketID = t.TicketID
+    WHERE t.TrainID = p_TrainID
+      AND t.ScheduleID = p_ScheduleID
+      AND p.CoachType = p_CoachType
+      AND p.BookingStatus = 'WL'
+      AND t.JourneyDate = p_JourneyDate;
+
+    -- Calculate fare
+    SELECT Distance INTO v_FromDistance FROM TrainStops
+    WHERE ScheduleID = p_ScheduleID AND StationName = p_FromStation;
+
+    SELECT Distance INTO v_ToDistance FROM TrainStops
+    WHERE ScheduleID = p_ScheduleID AND StationName = p_ToStation;
+
+    SET v_Distance = v_ToDistance - v_FromDistance;
+
+    SELECT ROUND(BaseFare * v_Distance / 100, 2) INTO v_Fare
+    FROM Coaches WHERE TrainID = p_TrainID AND CoachType = p_CoachType LIMIT 1;
+
+    -- Wallet check
+    IF p_PaymentMethod = 'wallet' THEN
+        SELECT Balance INTO v_WalletBalance FROM EWallet WHERE UserID = p_UserID;
+        IF v_WalletBalance < v_Fare THEN
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Insufficient wallet balance';
+        END IF;
+    END IF;
+
+    -- Generate PNR
+    SET p_PNR = CONCAT('PNR', LPAD(p_TrainID, 4, '0'), DATE_FORMAT(NOW(), '%d%m%y'), LPAD(FLOOR(RAND() * 10000), 4, '0'));
+
+    -- Insert ticket
+    INSERT INTO Tickets (
+        PNR, UserID, TrainID, ScheduleID, FromStation, ToStation,
+        BookingDate, JourneyDate, TotalPassengers, TotalFare,
+        PaymentMethod, PaymentID, BookingStatus
+    ) VALUES (
+        p_PNR, p_UserID, p_TrainID, p_ScheduleID, p_FromStation, p_ToStation,
+        NOW(), p_JourneyDate, 1, v_Fare,
+        p_PaymentMethod, p_PaymentID, 'confirmed'
+    );
+
+    SET p_TicketID = LAST_INSERT_ID();
+
+    -- Booking logic
+    IF v_BookedConfirmed < FLOOR(v_TotalSeats * 0.8) THEN
+        SET v_BookingStatus = 'confirmed';
+        SET v_SeatAllocation = CONCAT(p_CoachType, '-', v_BookedConfirmed + 1);
+
+        -- Decrease available seats only for confirmed
+        UPDATE Coaches
+        SET AvailableSeats = AvailableSeats - 1
+        WHERE TrainID = p_TrainID AND CoachType = p_CoachType;
+        
+    ELSEIF v_BookedRAC < (v_TotalSeats - FLOOR(v_TotalSeats * 0.8)) * 2 THEN
+        SET v_BookingStatus = 'RAC';
+        -- 2 RACs share one seat: determine seat number
+        SET v_RACSeatNo = FLOOR(v_BookedRAC / 2) + FLOOR(v_TotalSeats * 0.8) + 1;
+        SET v_SeatAllocation = CONCAT('RAC ', v_BookedRAC + 1, ' (', p_CoachType, '-', v_RACSeatNo, ')');
+        
+    ELSE
+        IF v_WLCount >= 10 THEN
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'REGRET';
+        END IF;
+        SET v_BookingStatus = 'WL';
+        SET v_SeatAllocation = CONCAT('WL ', v_WLCount + 1);
+    END IF;
+
+    -- Insert passenger
+    INSERT INTO Passengers (
+        TicketID, Name, Age, Gender, CoachType, SeatAllocation, BookingStatus
+    )
+    VALUES (
+        p_TicketID, p_PassengerName, p_PassengerAge, p_PassengerGender,
+        p_CoachType, v_SeatAllocation, v_BookingStatus
+    );
+
+    -- Log transaction
+    INSERT INTO Transactions (
+        TicketID, UserID, Amount, TransactionType, TransactionDate,
+        PaymentMethod, PaymentStatus, Remarks
+    )
+    VALUES (
+        p_TicketID, p_UserID, v_Fare, 'booking', NOW(),
+        p_PaymentMethod, 'confirmed', CONCAT('1 Passenger Booking - ', v_BookingStatus)
+    );
+
+    COMMIT;
+END$$
+
+DELIMITER ;
+
+
+
+
+-- OLD
+
 -- (f) Book ticket with 1 passenger
 DELIMITER $$
 CREATE PROCEDURE sp_BookTicket1(
@@ -900,7 +1214,238 @@ BEGIN
     COMMIT;
 END$$
 DELIMITER ;
+drop procedure sp_CancelTicket;
+-- NEW 
 
+DELIMITER $$
+
+CREATE PROCEDURE sp_CancelTicket(
+    IN p_TicketID INT,
+    IN p_UserID INT,
+    IN p_RefundTo VARCHAR(20),
+    OUT p_RefundAmount DECIMAL(10,2),
+    OUT p_Status VARCHAR(50)
+)
+BEGIN
+    DECLARE v_BookingStatus VARCHAR(20);
+    DECLARE v_TotalFare DECIMAL(10,2);
+    DECLARE v_JourneyDate DATE;
+    DECLARE v_TrainID INT;
+    DECLARE v_CoachType VARCHAR(10);
+    DECLARE v_DaysToJourney INT;
+    DECLARE v_RefundPercentage INT;
+    DECLARE v_TicketExists INT DEFAULT 0;
+
+    START TRANSACTION;
+
+    -- Verify ticket
+    SELECT COUNT(*) INTO v_TicketExists
+    FROM Tickets
+    WHERE TicketID = p_TicketID AND UserID = p_UserID;
+
+    IF v_TicketExists = 0 THEN
+        SET p_Status = 'Ticket not found';
+        SET p_RefundAmount = 0;
+        ROLLBACK;
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Ticket not found';
+    END IF;
+
+    -- Get booking info
+    SELECT BookingStatus, TotalFare, JourneyDate, TrainID
+    INTO v_BookingStatus, v_TotalFare, v_JourneyDate, v_TrainID
+    FROM Tickets
+    WHERE TicketID = p_TicketID AND UserID = p_UserID;
+
+    -- Prevent duplicate cancellation
+    IF v_BookingStatus = 'cancelled' THEN
+        SET p_Status = 'Already cancelled';
+        SET p_RefundAmount = 0;
+        ROLLBACK;
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Ticket already cancelled';
+    END IF;
+
+    -- Get coach type for passenger
+    SELECT CoachType INTO v_CoachType
+    FROM Passengers
+    WHERE TicketID = p_TicketID
+    LIMIT 1;
+
+    -- Refund calculation
+    SET v_DaysToJourney = DATEDIFF(v_JourneyDate, CURRENT_DATE());
+
+    IF v_DaysToJourney > 7 THEN
+        SET v_RefundPercentage = 90;
+    ELSEIF v_DaysToJourney > 3 THEN
+        SET v_RefundPercentage = 75;
+    ELSEIF v_DaysToJourney > 1 THEN
+        SET v_RefundPercentage = 50;
+    ELSE
+        SET v_RefundPercentage = 25;
+    END IF;
+
+    SET p_RefundAmount = ROUND((v_TotalFare * v_RefundPercentage) / 100, 2);
+
+    -- Cancel ticket
+    UPDATE Tickets
+    SET BookingStatus = 'cancelled'
+    WHERE TicketID = p_TicketID AND UserID = p_UserID;
+
+    UPDATE Passengers
+    SET BookingStatus = 'cancelled'
+    WHERE TicketID = p_TicketID;
+
+    -- If confirmed, increase available seats
+    IF v_BookingStatus = 'confirmed' THEN
+        UPDATE Coaches
+        SET AvailableSeats = AvailableSeats + 1
+        WHERE TrainID = v_TrainID AND CoachType = v_CoachType;
+    END IF;
+
+    -- Insert cancellation record
+    INSERT INTO Cancellation (
+        TicketID, CancellationDate, RefundAmount, RefundStatus, RefundTo
+    ) VALUES (
+        p_TicketID, NOW(), p_RefundAmount, 'processed', p_RefundTo
+    );
+
+    -- Log transaction
+    INSERT INTO Transactions (
+        TicketID, UserID, Amount, TransactionType,
+        TransactionDate, PaymentMethod, PaymentStatus, Remarks
+    ) VALUES (
+        p_TicketID, p_UserID, p_RefundAmount, 'cancellation',
+        NOW(), p_RefundTo, 'confirmed',
+        CONCAT('Refund at ', v_RefundPercentage, '% of original fare')
+    );
+
+    -- Shift RAC and WL
+    CALL sp_HandleRACandWLShifts(v_CoachType);
+
+    SET p_Status = 'Ticket cancelled and RAC/WL adjusted';
+    COMMIT;
+END$$
+
+DELIMITER ;
+
+
+DELIMITER $$
+
+CREATE PROCEDURE sp_CancelTicket(
+    IN p_TicketID INT,
+    IN p_UserID INT,
+    IN p_RefundTo VARCHAR(20), -- 'wallet' or 'original_payment'
+    OUT p_RefundAmount DECIMAL(10,2),
+    OUT p_Status VARCHAR(50)
+)
+BEGIN
+    DECLARE v_BookingStatus VARCHAR(20);
+    DECLARE v_TotalFare DECIMAL(10,2);
+    DECLARE v_JourneyDate DATE;
+    DECLARE v_BookingDate TIMESTAMP;
+    DECLARE v_TrainID INT;
+    DECLARE v_DaysToJourney INT;
+    DECLARE v_RefundPercentage INT;
+    DECLARE v_TotalPassengers INT;
+    DECLARE v_CoachType VARCHAR(10);
+    DECLARE v_TicketExists INT DEFAULT 0;
+
+    -- Start transaction
+    START TRANSACTION;
+
+    -- Ensure ticket exists
+    SELECT 
+        COUNT(*) INTO v_TicketExists
+    FROM Tickets
+    WHERE TicketID = p_TicketID AND UserID = p_UserID;
+
+    IF v_TicketExists = 0 THEN
+        SET p_Status = 'Ticket not found or does not belong to user';
+        SET p_RefundAmount = 0;
+        ROLLBACK;
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Ticket not found or does not belong to user';
+    END IF;
+
+    -- Fetch ticket info
+    SELECT 
+        BookingStatus, TotalFare, JourneyDate, BookingDate,
+        TrainID, TotalPassengers
+    INTO 
+        v_BookingStatus, v_TotalFare, v_JourneyDate, v_BookingDate,
+        v_TrainID, v_TotalPassengers
+    FROM Tickets
+    WHERE TicketID = p_TicketID AND UserID = p_UserID;
+
+    IF v_BookingStatus = 'cancelled' THEN
+        SET p_Status = 'Ticket already cancelled';
+        SET p_RefundAmount = 0;
+        ROLLBACK;
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Ticket already cancelled';
+    END IF;
+
+    -- Refund logic
+    SET v_DaysToJourney = DATEDIFF(v_JourneyDate, CURRENT_DATE());
+
+    IF v_DaysToJourney > 7 THEN
+        SET v_RefundPercentage = 90;
+    ELSEIF v_DaysToJourney > 3 THEN
+        SET v_RefundPercentage = 75;
+    ELSEIF v_DaysToJourney > 1 THEN
+        SET v_RefundPercentage = 50;
+    ELSE
+        SET v_RefundPercentage = 25;
+    END IF;
+
+    SET p_RefundAmount = ROUND((v_TotalFare * v_RefundPercentage) / 100, 2);
+
+    -- Cancel ticket
+    UPDATE Tickets
+    SET BookingStatus = 'cancelled'
+    WHERE TicketID = p_TicketID AND UserID = p_UserID;
+
+    -- Get any one coach type from this ticket
+    SELECT CoachType INTO v_CoachType
+    FROM Passengers
+    WHERE TicketID = p_TicketID
+    LIMIT 1;
+
+    -- Insert cancellation record
+    INSERT INTO Cancellation (
+        TicketID, CancellationDate, RefundAmount, RefundStatus, RefundTo
+    )
+    VALUES (
+        p_TicketID, NOW(), p_RefundAmount, 'processed', p_RefundTo
+    );
+
+    -- Insert transaction
+    INSERT INTO Transactions (
+        TicketID, UserID, Amount, TransactionType,
+        TransactionDate, PaymentMethod, PaymentStatus, Remarks
+    )
+    VALUES (
+        p_TicketID, p_UserID, p_RefundAmount, 'cancellation',
+        NOW(), p_RefundTo, 'confirmed',
+        CONCAT('Refund at ', v_RefundPercentage, '% of original fare')
+    );
+
+    -- Update passenger status
+    UPDATE Passengers
+    SET BookingStatus = 'cancelled'
+    WHERE TicketID = p_TicketID;
+
+    -- Shift RAC and WL
+    CALL sp_HandleRACandWLShifts(v_CoachType);
+
+    SET p_Status = 'Ticket cancelled and RAC/WL adjusted';
+
+    COMMIT;
+END$$
+
+DELIMITER ;
+
+
+
+
+-- OLD 
 drop procedure sp_CancelTicket;
 
 DELIMITER $$
@@ -990,10 +1535,7 @@ BEGIN
     LIMIT 1;
     
     -- Update available seats
-    UPDATE Coaches
-    SET AvailableSeats = AvailableSeats + v_TotalPassengers
-    WHERE TrainID = v_TrainID 
-      AND CoachType = v_CoachType;
+    CALL sp_HandleRACandWLShifts(v_CoachType);
     
     -- Insert cancellation record
     INSERT INTO Cancellation (
@@ -1019,6 +1561,47 @@ BEGIN
     COMMIT;
 END$$
 DELIMITER ;
+
+
+-- rac wl handling
+
+DELIMITER $$
+
+CREATE PROCEDURE sp_HandleRACandWLShifts(
+    IN p_CoachType VARCHAR(10)
+)
+BEGIN
+    DECLARE v_NextSeatNo INT;
+
+    -- Get number of confirmed seats used
+    SELECT COUNT(*) + 1 INTO v_NextSeatNo
+    FROM Passengers
+    WHERE BookingStatus = 'confirmed' AND CoachType = p_CoachType;
+
+    -- Promote RAC 1 to confirmed
+    UPDATE Passengers
+    SET BookingStatus = 'confirmed', SeatAllocation = CONCAT(p_CoachType, '-', v_NextSeatNo)
+    WHERE BookingStatus = 'RAC' AND CoachType = p_CoachType
+    ORDER BY SeatAllocation LIMIT 1;
+
+    -- Shift RAC numbers
+    UPDATE Passengers
+    SET SeatAllocation = CONCAT('RAC ', CAST(SUBSTRING_INDEX(SeatAllocation, ' ', -1) - 1 AS CHAR))
+    WHERE BookingStatus = 'RAC' AND CAST(SUBSTRING_INDEX(SeatAllocation, ' ', -1) AS UNSIGNED) > 1;
+
+    -- Promote WL 1 to RAC 7
+    UPDATE Passengers
+    SET BookingStatus = 'RAC', SeatAllocation = 'RAC 7'
+    WHERE BookingStatus = 'WL' AND SeatAllocation = 'WL 1' AND CoachType = p_CoachType;
+
+    -- Shift WL numbers
+    UPDATE Passengers
+    SET SeatAllocation = CONCAT('WL ', CAST(SUBSTRING_INDEX(SeatAllocation, ' ', -1) - 1 AS CHAR))
+    WHERE BookingStatus = 'WL' AND CAST(SUBSTRING_INDEX(SeatAllocation, ' ', -1) AS UNSIGNED) > 1;
+END$$
+
+DELIMITER ;
+
 
 DELIMITER $$
 CREATE PROCEDURE sp_ViewUserBookings(
@@ -1450,13 +2033,6 @@ INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, Depart
 (20, 'Bangalore', 2, '08:00:00', '08:10:00', 350),
 (20, 'Hyderabad', 3, '13:00:00', NULL, 750);
 
-select * from passengers;
-show tables;
-
-select * from users;
-
-select * from trainstops;
-
 drop procedure sp_TrainAvailability;
 
 DELIMITER //
@@ -1492,6 +2068,9 @@ END //
 
 DELIMITER ;
 select * from trainstops;
+
+-- USER INTERACTION EXAMPLES
+
 CALL sp_TrainAvailability('Delhi', 'Patna', '2025-04-14');
 
 select * from coaches;
@@ -1520,14 +2099,33 @@ SELECT @ticket_id AS TicketID;
 
 select @pnr AS PNR;
 
-update ewallet set Balance = Balance +2000 where UserID = 1;
+update ewallet set Balance = 2000 where UserID = 1;
 select * from ewallet;
 select * from tickets;
 select * from cancellation;
-select * from transactions;
+select * from trainstops;
 select * from passengers;
-
+select * from coaches;
+select * from trains;
+select * from transactions;
 show tables;
+
+CALL sp_BookTicket1(
+    1,           -- UserID
+    1,                      -- TrainID
+    (SELECT ScheduleID FROM TrainSchedule WHERE TrainID = 1),
+    'Lucknow',                -- FromStation
+    'Patna',                -- ToStation
+    '2025-04-14',           -- JourneyDate
+    '3A',                   -- CoachType
+    'Jonson Smith',          -- Passenger Name
+    18,                     -- Age
+    'A',                    -- Gender
+    'wallet',               -- PaymentMethod (no PaymentID required for wallet)
+    NULL,                   -- PaymentID
+    @pnr,                   -- OUT: PNR
+    @ticket_id              -- OUT: TicketID
+);
 
 CALL sp_BookTicket1(
     1,           -- UserID
@@ -1536,8 +2134,8 @@ CALL sp_BookTicket1(
     'Delhi',                -- FromStation
     'Patna',                -- ToStation
     '2025-04-14',           -- JourneyDate
-    '3A',                   -- CoachType
-    'Tom Smith',          -- Passenger Name
+    '1A',                   -- CoachType
+    'oocsdc',          -- Passenger Name
     19,                     -- Age
     'M',                    -- Gender
     'wallet',               -- PaymentMethod (no PaymentID required for wallet)
@@ -1549,12 +2147,19 @@ CALL sp_BookTicket1(
 SET @refund_amt = 0.00;
 SET @status = '';
 
+SET SQL_SAFE_UPDATES = 0;
+
+select * from coaches;
+
 CALL sp_CancelTicket(
-    2,             -- TicketID
+    61,             -- TicketID
     1,           -- UserID
     'wallet',               -- RefundTo: 'wallet' or 'original_payment'
     @refund_amt,            -- OUT: RefundAmount
     @status                 -- OUT: Status
 );
 SELECT @refund_amt AS RefundAmount, @status AS RefundStatus;
+
+CALL sp_ViewUserBookings(1, 'all', NULL, NULL);
+select * from coaches;
 
