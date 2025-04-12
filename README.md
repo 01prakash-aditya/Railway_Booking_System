@@ -1,91 +1,171 @@
-🚆 Railway Reservation System – Mini Project
-This mini-project implements a comprehensive Railway Reservation System using SQL. It manages operations like ticket booking, seat allocation, refunds, passenger records, train schedules, and more through robust table design, procedures, and triggers.
+🚆 Railway Reservation System — SQL Project
+📘 Project Overview
+This SQL project is a comprehensive railway reservation database system that allows users to search trains, book tickets (for up to 3 passengers), manage payments (via cards, UPI, or wallet), and handle cancellations with partial refunds. It includes:
 
-📂 Database Schema
-The project uses the following key entities:
+User Authentication & Registration
 
-🔹 Main Tables
-Passenger – Stores passenger details including age, contact, and concessions.
+Train Schedules and Stops
 
-Station – Records stations with names and locations.
+Coach and Seat Availability
 
-Train – Holds train details, source, and destination stations.
+Fare Calculation Based on Distance and Coach Type
 
-Route – Defines train stopovers with arrival/departure and stop number.
+Wallet Transactions
 
-Schedule – Tracks each train's daily run/cancellation.
+Stored Procedures for Bookings, Cancellations, and Queries
 
-Class – Class types (Sleeper, AC, etc.) and fare per kilometer.
+Triggers to manage automatic updates
 
-Seat – Maps train-class combinations with seat numbers.
+🗃️ Database Schema Summary
+Main Entities:
+Users – Info about users including contact and type.
 
-Ticket – Booking status, seat assignment, and PNR for each passenger.
+PaymentDetails – Card/UPI records per user.
 
-Payment – Tracks payment mode, amount, refund status, and ticket linkage.
+EWallet – Balance tracking per user.
 
-🔹 Relationship Tables (RL)
-TicketPassenger – Links tickets to multiple passengers.
+Trains – List of trains and types.
 
-SeatAvailability – Tracks if a seat is booked on a given schedule.
+TrainSchedule – Running days & status per train.
 
-TrainClass – Maps classes available on each train.
+TrainStops – Route with arrival/departure time and distance.
 
-RAC_WL_Status – Stores waitlist/RAC positions and statuses.
+Coaches – Coach details like type, seats, fare.
 
-⚙️ Stored Procedures
-Includes logic for:
+Tickets – Booking record per journey.
 
-GetPNRStatus – Fetch ticket status by PNR.
+Passengers – Info for each passenger in a booking.
 
-GetTrainSchedule – Show train run schedule.
+Transactions – Payment or refund transactions.
 
-GetAvailableSeats – List unbooked seats for given class/date.
+Cancellation – Refund details on ticket cancellation.
 
-GetPassengersByTrainDate – List passengers on a train/date.
+🛠️ Setup Instructions
+🧹 Step 1: Cleanup
+Ensure all previous tables are dropped:
 
-GetWaitlistedPassengers – Show WL passengers for a train.
+sql
+Copy
+Edit
+DROP TABLE IF EXISTS Cancellation, Transactions, Passengers, Tickets, Coaches, TrainStops, TrainSchedule, Trains, EWallet, PaymentDetails, Users;
+🏗️ Step 2: Create Tables, Triggers, and Procedures
+Run the SQL script sequentially from the file to:
 
-GetTotalRefundForCancelledTrain – Calculate refund for canceled trains.
+Create all required tables.
 
-GetRevenue – Calculate total earnings for a date range.
+Add triggers for:
 
-GetCancellationRecords – Show refund status for canceled trains.
+Validating phone numbers
 
-GetBusiestRoute – Determine most traveled station in routes.
+Creating eWallets
 
-GetItemizedBill – Generate ticket-wise bill with class-wise fare.
+Updating booking/cancellation statuses
 
-🔁 Triggers
-Automation via:
+Add stored procedures for all user and admin functionalities.
 
-AfterTicketInsert – Marks seat booked on confirmation.
+🧑‍💻 User Functions (via Stored Procedures)
+✅ Registration:
+sql
+Copy
+Edit
+CALL sp_CreateUser(...); -- Registers user & sets up payment + wallet
+🔐 Login:
+sql
+Copy
+Edit
+CALL sp_UserLogin(username, dob_as_password, ...);
+🔎 Search Trains:
+sql
+Copy
+Edit
+CALL sp_SearchTrains('FromStation', 'ToStation', 'YYYY-MM-DD');
+💳 Add Payment Method:
+sql
+Copy
+Edit
+CALL sp_AddPaymentMethod(userID, cardNumber, expiry, holderName, upi);
+💰 Wallet Recharge/Deduct:
+sql
+Copy
+Edit
+CALL sp_WalletOperation(userID, amount, 'add' or 'deduct', @newBalance);
+🎟️ Booking Tickets:
+sql
+Copy
+Edit
+CALL sp_BookTicket1(...); -- For 1 passenger
+CALL sp_BookTicket2(...); -- For 2 passengers
+CALL sp_BookTicket3(...); -- For 3 passengers
+📅 View Bookings:
+sql
+Copy
+Edit
+CALL sp_ViewUserBookings(userID, 'all' | 'active' | 'cancelled', fromDate, toDate);
+❌ Cancel Ticket:
+sql
+Copy
+Edit
+CALL sp_CancelTicket(ticketID, userID, 'wallet' | 'original_payment', @refund, @status);
+🛠️ Admin Setup Tasks
+Insert Train & Coach Data:
 
-AfterTrainCancellation – Auto-updates refunds if a train is canceled.
+Populate Trains, Coaches, and TrainSchedule as per the examples.
 
-BeforePaymentInsert – Validates positive payment amounts.
+Add Train Stops:
 
-PreventDoubleBooking – Prevents double seat booking.
+sql
+Copy
+Edit
+INSERT INTO TrainStops (...) VALUES (...);
+Initialize User Example:
 
-(Note: A placeholder trigger for RAC/WL reallocation on cancellations is provided.)
+sql
+Copy
+Edit
+CALL sp_CreateUser(...);
+UPDATE EWallet SET Balance = 2000 WHERE UserID = 1;
+Call Booking/Cancel for Testing:
 
-🧠 Features
-PNR status check
+sql
+Copy
+Edit
+CALL sp_BookTicket1(...);
+CALL sp_CancelTicket(...);
+🔁 Normalization Notes
+The database design adheres to 3NF (Third Normal Form):
 
-RAC/WL queue integration
+1NF: All attributes are atomic.
 
-Train-wise passenger tracking
+2NF: All non-key attributes depend on the full primary key.
 
-Automatic seat allocation and refunding
+3NF: No transitive dependencies. For example:
 
-Revenue and busiest route analytics
+Users → PaymentDetails, EWallet (1-to-1/1-to-many)
 
-Fully normalized table design
+TrainSchedule → Train (1-to-1)
 
-📌 Notes
-All procedures and triggers use MySQL's syntax with appropriate delimiters.
+Tickets → Users, Trains, Schedule (fully dependent)
 
-Enum constraints enforce consistency (e.g., Gender, ConcessionCategory).
+📄 Sample Test Queries
+sql
+Copy
+Edit
+-- Check wallet balance
+SELECT * FROM EWallet WHERE UserID = 1;
 
-Proper foreign keys maintain referential integrity across the system.
+-- View bookings
+CALL sp_ViewUserBookings(1, 'all', NULL, NULL);
 
-Additional logic (e.g., RAC/WL seat reallocation) can be implemented on top.
+-- Book ticket example
+CALL sp_BookTicket1(...);
+
+-- Cancel ticket
+CALL sp_CancelTicket(2, 1, 'wallet', @amt, @status);
+🧩 Future Enhancements
+Support for more passengers per booking.
+
+Admin panel to modify train schedules.
+
+Dynamic fare based on demand.
+
+Multi-language support.
