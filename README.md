@@ -89,6 +89,27 @@ This project replicates the Indian Railways' booking infrastructure. It features
 
 ---
 
+🔍 Stored Procedures 
+ListPassengersOnTrain(trainID, journeyDate)
+→ Lists all passengers booked on a specific train for a given journey date.
+
+GetWaitlistedPassengers(trainID)
+→ Retrieves all waitlisted passengers for the specified train.
+
+RefundableAmountForTrainCancellation(trainID, journeyDate)
+→ Calculates refundable amount as: total revenue minus refunded amount for that train on a given date.
+
+RevenueFromBookings(startDate, endDate)
+→ Returns total ticket booking revenue generated within the specified date range.
+
+BusiestRoute()
+→ Finds the most traveled route (FromStation → ToStation) based on total passenger count.
+
+ItemizedBill(ticketID)
+→ Generates a bill for the ticket showing base fare and additional charges breakdown.
+
+---
+
 ## 🔮 FUTURE IMPROVEMENTS
 
 - ✅ Multi-passenger ticket booking support
