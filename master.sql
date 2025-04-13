@@ -457,6 +457,8 @@ BEGIN
 END$$
 DELIMITER ;
 
+call sp_WalletOperation(1,1000,'add',@new);
+
 drop procedure sp_BookTicket1;
 
 DELIMITER $$
@@ -766,454 +768,6 @@ END$$
 
 DELIMITER ;
 
-
-
-
--- OLD
-
--- (f) Book ticket with 1 passenger
-DELIMITER $$
-CREATE PROCEDURE sp_BookTicket1(
-    IN p_UserID INT,
-    IN p_TrainID INT,
-    IN p_ScheduleID INT,
-    IN p_FromStation VARCHAR(50),
-    IN p_ToStation VARCHAR(50),
-    IN p_JourneyDate DATE,
-    IN p_CoachType VARCHAR(10),
-    IN p_PassengerName VARCHAR(50),
-    IN p_PassengerAge INT,
-    IN p_PassengerGender CHAR(1),
-    IN p_PaymentMethod VARCHAR(20),
-    IN p_PaymentID INT,  -- NULL if using wallet
-    OUT p_PNR VARCHAR(20),
-    OUT p_TicketID INT
-)
-BEGIN
-    DECLARE v_TotalAvailable INT;
-    DECLARE v_Fare DECIMAL(10,2);
-    DECLARE v_WalletBalance DECIMAL(10,2);
-    DECLARE v_FromDistance INT;
-    DECLARE v_ToDistance INT;
-    DECLARE v_Distance INT;
-    
-    -- Start transaction
-    START TRANSACTION;
-    
-    -- Check available seats
-    SELECT AvailableSeats INTO v_TotalAvailable
-    FROM Coaches
-    WHERE TrainID = p_TrainID 
-      AND CoachType = p_CoachType
-    LIMIT 1;
-    
-    IF v_TotalAvailable < 1 THEN
-        SIGNAL SQLSTATE '45000' 
-            SET MESSAGE_TEXT = 'Insufficient seats available';
-    END IF;
-    
-    -- Calculate fare based on distance
-    SELECT Distance INTO v_FromDistance
-    FROM TrainStops
-    WHERE ScheduleID = p_ScheduleID
-      AND StationName = p_FromStation;
-      
-    SELECT Distance INTO v_ToDistance
-    FROM TrainStops
-    WHERE ScheduleID = p_ScheduleID
-      AND StationName = p_ToStation;
-      
-    SET v_Distance = v_ToDistance - v_FromDistance;
-    
-    -- Calculate fare based on distance and coach type
-    SELECT ROUND(BaseFare * v_Distance / 100, 2) INTO v_Fare
-    FROM Coaches
-    WHERE TrainID = p_TrainID 
-      AND CoachType = p_CoachType
-    LIMIT 1;
-    
-    -- Check wallet balance if using wallet
-    IF p_PaymentMethod = 'wallet' THEN
-        SELECT Balance INTO v_WalletBalance
-        FROM EWallet
-        WHERE UserID = p_UserID;
-        
-        IF v_WalletBalance < v_Fare THEN
-            SIGNAL SQLSTATE '45000' 
-                SET MESSAGE_TEXT = 'Insufficient wallet balance';
-        END IF;
-    END IF;
-    
-    -- Generate PNR
-    SET p_PNR = CONCAT(
-      'PNR', 
-      LPAD(p_TrainID, 4, '0'),
-      DATE_FORMAT(NOW(), '%d%m%y'),
-      LPAD(FLOOR(RAND() * 10000), 4, '0')
-    );
-    
-    -- Insert ticket record
-    INSERT INTO Tickets (
-        PNR, UserID, TrainID, ScheduleID, FromStation, ToStation,
-        BookingDate, JourneyDate, TotalPassengers, TotalFare,
-        PaymentMethod, PaymentID, BookingStatus
-    )
-    VALUES (
-        p_PNR, p_UserID, p_TrainID, p_ScheduleID, p_FromStation, p_ToStation,
-        NOW(), p_JourneyDate, 1, v_Fare,
-        p_PaymentMethod, p_PaymentID, 'confirmed'
-    );
-    
-    SET p_TicketID = LAST_INSERT_ID();
-    
-    -- Insert passenger
-    INSERT INTO Passengers (
-        TicketID, Name, Age, Gender, CoachType, SeatAllocation, BookingStatus
-    )
-    VALUES (
-        p_TicketID,
-        p_PassengerName,
-        p_PassengerAge,
-        p_PassengerGender,
-        p_CoachType,
-        CONCAT(p_CoachType, '-', LPAD(FLOOR(RAND() * 100), 3, '0')),
-        'confirmed'
-    );
-    
-    -- Update available seats
-    UPDATE Coaches
-    SET AvailableSeats = AvailableSeats - 1
-    WHERE TrainID = p_TrainID 
-      AND CoachType = p_CoachType;
-    
-    -- Create transaction record
-    INSERT INTO Transactions (
-        TicketID, UserID, Amount, TransactionType,
-        TransactionDate, PaymentMethod, PaymentStatus, Remarks
-    )
-    VALUES (
-        p_TicketID, p_UserID, v_Fare, 'booking',
-        NOW(), p_PaymentMethod, 'confirmed', '1 Passenger Booking'
-    );
-    
-    -- Wallet is updated by trigger if payment method is 'wallet'
-    
-    COMMIT;
-END$$
-DELIMITER ;
-
--- (g) Book ticket with 2 passengers
-DELIMITER $$
-CREATE PROCEDURE sp_BookTicket2(
-    IN p_UserID INT,
-    IN p_TrainID INT,
-    IN p_ScheduleID INT,
-    IN p_FromStation VARCHAR(50),
-    IN p_ToStation VARCHAR(50),
-    IN p_JourneyDate DATE,
-    IN p_CoachType VARCHAR(10),
-    IN p_PassengerName1 VARCHAR(50),
-    IN p_PassengerAge1 INT,
-    IN p_PassengerGender1 CHAR(1),
-    IN p_PassengerName2 VARCHAR(50),
-    IN p_PassengerAge2 INT,
-    IN p_PassengerGender2 CHAR(1),
-    IN p_PaymentMethod VARCHAR(20),
-    IN p_PaymentID INT,  -- NULL if using wallet
-    OUT p_PNR VARCHAR(20),
-    OUT p_TicketID INT
-)
-BEGIN
-    DECLARE v_TotalAvailable INT;
-    DECLARE v_Fare DECIMAL(10,2);
-    DECLARE v_WalletBalance DECIMAL(10,2);
-    DECLARE v_FromDistance INT;
-    DECLARE v_ToDistance INT;
-    DECLARE v_Distance INT;
-    
-    -- Start transaction
-    START TRANSACTION;
-    
-    -- Check available seats
-    SELECT AvailableSeats INTO v_TotalAvailable
-    FROM Coaches
-    WHERE TrainID = p_TrainID 
-      AND CoachType = p_CoachType
-    LIMIT 1;
-    
-    IF v_TotalAvailable < 2 THEN
-        SIGNAL SQLSTATE '45000' 
-            SET MESSAGE_TEXT = 'Insufficient seats available';
-    END IF;
-    
-    -- Calculate fare based on distance
-    SELECT Distance INTO v_FromDistance
-    FROM TrainStops
-    WHERE ScheduleID = p_ScheduleID
-      AND StationName = p_FromStation;
-      
-    SELECT Distance INTO v_ToDistance
-    FROM TrainStops
-    WHERE ScheduleID = p_ScheduleID
-      AND StationName = p_ToStation;
-      
-    SET v_Distance = v_ToDistance - v_FromDistance;
-    
-    -- Calculate fare based on distance and coach type
-    SELECT ROUND(BaseFare * v_Distance / 100 * 2, 2) INTO v_Fare
-    FROM Coaches
-    WHERE TrainID = p_TrainID 
-      AND CoachType = p_CoachType
-    LIMIT 1;
-    
-    -- Check wallet balance if using wallet
-    IF p_PaymentMethod = 'wallet' THEN
-        SELECT Balance INTO v_WalletBalance
-        FROM EWallet
-        WHERE UserID = p_UserID;
-        
-        IF v_WalletBalance < v_Fare THEN
-            SIGNAL SQLSTATE '45000' 
-                SET MESSAGE_TEXT = 'Insufficient wallet balance';
-        END IF;
-    END IF;
-    
-    -- Generate PNR
-    SET p_PNR = CONCAT(
-      'PNR', 
-      LPAD(p_TrainID, 4, '0'),
-      DATE_FORMAT(NOW(), '%d%m%y'),
-      LPAD(FLOOR(RAND() * 10000), 4, '0')
-    );
-    
-    -- Insert ticket record
-    INSERT INTO Tickets (
-        PNR, UserID, TrainID, ScheduleID, FromStation, ToStation,
-        BookingDate, JourneyDate, TotalPassengers, TotalFare,
-        PaymentMethod, PaymentID, BookingStatus
-    )
-    VALUES (
-        p_PNR, p_UserID, p_TrainID, p_ScheduleID, p_FromStation, p_ToStation,
-        NOW(), p_JourneyDate, 2, v_Fare,
-        p_PaymentMethod, p_PaymentID, 'confirmed'
-    );
-    
-    SET p_TicketID = LAST_INSERT_ID();
-    
-    -- Insert passenger 1
-    INSERT INTO Passengers (
-        TicketID, Name, Age, Gender, CoachType, SeatAllocation, BookingStatus
-    )
-    VALUES (
-        p_TicketID,
-        p_PassengerName1,
-        p_PassengerAge1,
-        p_PassengerGender1,
-        p_CoachType,
-        CONCAT(p_CoachType, '-', LPAD(FLOOR(RAND() * 100), 3, '0')),
-        'confirmed'
-    );
-    
-    -- Insert passenger 2
-    INSERT INTO Passengers (
-        TicketID, Name, Age, Gender, CoachType, SeatAllocation, BookingStatus
-    )
-    VALUES (
-        p_TicketID,
-        p_PassengerName2,
-        p_PassengerAge2,
-        p_PassengerGender2,
-        p_CoachType,
-        CONCAT(p_CoachType, '-', LPAD(FLOOR(RAND() * 100) + 1, 3, '0')),
-        'confirmed'
-    );
-    
-    -- Update available seats
-    UPDATE Coaches
-    SET AvailableSeats = AvailableSeats - 2
-    WHERE TrainID = p_TrainID 
-      AND CoachType = p_CoachType;
-    
-    -- Create transaction record
-    INSERT INTO Transactions (
-        TicketID, UserID, Amount, TransactionType,
-        TransactionDate, PaymentMethod, PaymentStatus, Remarks
-    )
-    VALUES (
-        p_TicketID, p_UserID, v_Fare, 'booking',
-        NOW(), p_PaymentMethod, 'confirmed', '2 Passenger Booking'
-    );
-    
-    -- Wallet is updated by trigger if payment method is 'wallet'
-    
-    COMMIT;
-END$$
-DELIMITER ;
-
--- (h) Book ticket with 3 passengers
-DELIMITER $$
-CREATE PROCEDURE sp_BookTicket3(
-    IN p_UserID INT,
-    IN p_TrainID INT,
-    IN p_ScheduleID INT,
-    IN p_FromStation VARCHAR(50),
-    IN p_ToStation VARCHAR(50),
-    IN p_JourneyDate DATE,
-    IN p_CoachType VARCHAR(10),
-    IN p_PassengerName1 VARCHAR(50),
-    IN p_PassengerAge1 INT,
-    IN p_PassengerGender1 CHAR(1),
-    IN p_PassengerName2 VARCHAR(50),
-    IN p_PassengerAge2 INT,
-    IN p_PassengerGender2 CHAR(1),
-    IN p_PassengerName3 VARCHAR(50),
-    IN p_PassengerAge3 INT,
-    IN p_PassengerGender3 CHAR(1),
-    IN p_PaymentMethod VARCHAR(20),
-    IN p_PaymentID INT,  -- NULL if using wallet
-    OUT p_PNR VARCHAR(20),
-    OUT p_TicketID INT
-)
-BEGIN
-    DECLARE v_TotalAvailable INT;
-    DECLARE v_Fare DECIMAL(10,2);
-    DECLARE v_WalletBalance DECIMAL(10,2);
-    DECLARE v_FromDistance INT;
-    DECLARE v_ToDistance INT;
-    DECLARE v_Distance INT;
-    
-    -- Start transaction
-    START TRANSACTION;
-    
-    -- Check available seats
-    SELECT AvailableSeats INTO v_TotalAvailable
-    FROM Coaches
-    WHERE TrainID = p_TrainID 
-      AND CoachType = p_CoachType
-    LIMIT 1;
-    
-    IF v_TotalAvailable < 3 THEN
-        SIGNAL SQLSTATE '45000' 
-            SET MESSAGE_TEXT = 'Insufficient seats available';
-    END IF;
-    
-    -- Calculate fare based on distance
-    SELECT Distance INTO v_FromDistance
-    FROM TrainStops
-    WHERE ScheduleID = p_ScheduleID
-      AND StationName = p_FromStation;
-      
-    SELECT Distance INTO v_ToDistance
-    FROM TrainStops
-    WHERE ScheduleID = p_ScheduleID
-      AND StationName = p_ToStation;
-      
-    SET v_Distance = v_ToDistance - v_FromDistance;
-    
-    -- Calculate fare based on distance and coach type
-    SELECT ROUND(BaseFare * v_Distance / 100 * 3, 2) INTO v_Fare
-    FROM Coaches
-    WHERE TrainID = p_TrainID 
-      AND CoachType = p_CoachType
-    LIMIT 1;
-    
-    -- Check wallet balance if using wallet
-    IF p_PaymentMethod = 'wallet' THEN
-        SELECT Balance INTO v_WalletBalance
-        FROM EWallet
-        WHERE UserID = p_UserID;
-        
-        IF v_WalletBalance < v_Fare THEN
-            SIGNAL SQLSTATE '45000' 
-                SET MESSAGE_TEXT = 'Insufficient wallet balance';
-        END IF;
-    END IF;
-    
-    -- Generate PNR
-    SET p_PNR = CONCAT(
-      'PNR', 
-      LPAD(p_TrainID, 4, '0'),
-      DATE_FORMAT(NOW(), '%d%m%y'),
-      LPAD(FLOOR(RAND() * 10000), 4, '0')
-    );
-    
-    -- Insert ticket record
-    INSERT INTO Tickets (
-        PNR, UserID, TrainID, ScheduleID, FromStation, ToStation,
-        BookingDate, JourneyDate, TotalPassengers, TotalFare,
-        PaymentMethod, PaymentID, BookingStatus
-    )
-    VALUES (
-        p_PNR, p_UserID, p_TrainID, p_ScheduleID, p_FromStation, p_ToStation,
-        NOW(), p_JourneyDate, 3, v_Fare,
-        p_PaymentMethod, p_PaymentID, 'confirmed'
-    );
-    
-    SET p_TicketID = LAST_INSERT_ID();
-    
-    -- Insert passenger 1
-    INSERT INTO Passengers (
-        TicketID, Name, Age, Gender, CoachType, SeatAllocation, BookingStatus
-    )
-    VALUES (
-        p_TicketID,
-        p_PassengerName1,
-        p_PassengerAge1,
-        p_PassengerGender1,
-        p_CoachType,
-        CONCAT(p_CoachType, '-', LPAD(FLOOR(RAND() * 100), 3, '0')),
-        'confirmed'
-    );
-    
-    -- Insert passenger 2
-    INSERT INTO Passengers (
-        TicketID, Name, Age, Gender, CoachType, SeatAllocation, BookingStatus
-    )
-    VALUES (
-        p_TicketID,
-        p_PassengerName2,
-        p_PassengerAge2,
-        p_PassengerGender2,
-        p_CoachType,
-        CONCAT(p_CoachType, '-', LPAD(FLOOR(RAND() * 100) + 1, 3, '0')),
-        'confirmed'
-    );
-    
-    -- Insert passenger 3
-    INSERT INTO Passengers (
-        TicketID, Name, Age, Gender, CoachType, SeatAllocation, BookingStatus
-    )
-    VALUES (
-        p_TicketID,
-        p_PassengerName3,
-        p_PassengerAge3,
-        p_PassengerGender3,
-        p_CoachType,
-        CONCAT(p_CoachType, '-', LPAD(FLOOR(RAND() * 100) + 2, 3, '0')),
-        'confirmed'
-    );
-    
-    -- Update available seats
-    UPDATE Coaches
-    SET AvailableSeats = AvailableSeats - 3
-    WHERE TrainID = p_TrainID 
-      AND CoachType = p_CoachType;
-    
-    -- Create transaction record
-    INSERT INTO Transactions (
-        TicketID, UserID, Amount, TransactionType,
-        TransactionDate, PaymentMethod, PaymentStatus, Remarks
-    )
-    VALUES (
-        p_TicketID, p_UserID, v_Fare, 'booking',
-        NOW(), p_PaymentMethod, 'confirmed', '3 Passenger Booking'
-    );
-    
-    -- Wallet is updated by trigger if payment method is 'wallet'
-    
-    COMMIT;
-END$$
-DELIMITER ;
 drop procedure sp_CancelTicket;
 -- NEW 
 
@@ -1326,124 +880,6 @@ BEGIN
 END$$
 
 DELIMITER ;
-
-
-DELIMITER $$
-
-CREATE PROCEDURE sp_CancelTicket(
-    IN p_TicketID INT,
-    IN p_UserID INT,
-    IN p_RefundTo VARCHAR(20), -- 'wallet' or 'original_payment'
-    OUT p_RefundAmount DECIMAL(10,2),
-    OUT p_Status VARCHAR(50)
-)
-BEGIN
-    DECLARE v_BookingStatus VARCHAR(20);
-    DECLARE v_TotalFare DECIMAL(10,2);
-    DECLARE v_JourneyDate DATE;
-    DECLARE v_BookingDate TIMESTAMP;
-    DECLARE v_TrainID INT;
-    DECLARE v_DaysToJourney INT;
-    DECLARE v_RefundPercentage INT;
-    DECLARE v_TotalPassengers INT;
-    DECLARE v_CoachType VARCHAR(10);
-    DECLARE v_TicketExists INT DEFAULT 0;
-
-    -- Start transaction
-    START TRANSACTION;
-
-    -- Ensure ticket exists
-    SELECT 
-        COUNT(*) INTO v_TicketExists
-    FROM Tickets
-    WHERE TicketID = p_TicketID AND UserID = p_UserID;
-
-    IF v_TicketExists = 0 THEN
-        SET p_Status = 'Ticket not found or does not belong to user';
-        SET p_RefundAmount = 0;
-        ROLLBACK;
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Ticket not found or does not belong to user';
-    END IF;
-
-    -- Fetch ticket info
-    SELECT 
-        BookingStatus, TotalFare, JourneyDate, BookingDate,
-        TrainID, TotalPassengers
-    INTO 
-        v_BookingStatus, v_TotalFare, v_JourneyDate, v_BookingDate,
-        v_TrainID, v_TotalPassengers
-    FROM Tickets
-    WHERE TicketID = p_TicketID AND UserID = p_UserID;
-
-    IF v_BookingStatus = 'cancelled' THEN
-        SET p_Status = 'Ticket already cancelled';
-        SET p_RefundAmount = 0;
-        ROLLBACK;
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Ticket already cancelled';
-    END IF;
-
-    -- Refund logic
-    SET v_DaysToJourney = DATEDIFF(v_JourneyDate, CURRENT_DATE());
-
-    IF v_DaysToJourney > 7 THEN
-        SET v_RefundPercentage = 90;
-    ELSEIF v_DaysToJourney > 3 THEN
-        SET v_RefundPercentage = 75;
-    ELSEIF v_DaysToJourney > 1 THEN
-        SET v_RefundPercentage = 50;
-    ELSE
-        SET v_RefundPercentage = 25;
-    END IF;
-
-    SET p_RefundAmount = ROUND((v_TotalFare * v_RefundPercentage) / 100, 2);
-
-    -- Cancel ticket
-    UPDATE Tickets
-    SET BookingStatus = 'cancelled'
-    WHERE TicketID = p_TicketID AND UserID = p_UserID;
-
-    -- Get any one coach type from this ticket
-    SELECT CoachType INTO v_CoachType
-    FROM Passengers
-    WHERE TicketID = p_TicketID
-    LIMIT 1;
-
-    -- Insert cancellation record
-    INSERT INTO Cancellation (
-        TicketID, CancellationDate, RefundAmount, RefundStatus, RefundTo
-    )
-    VALUES (
-        p_TicketID, NOW(), p_RefundAmount, 'processed', p_RefundTo
-    );
-
-    -- Insert transaction
-    INSERT INTO Transactions (
-        TicketID, UserID, Amount, TransactionType,
-        TransactionDate, PaymentMethod, PaymentStatus, Remarks
-    )
-    VALUES (
-        p_TicketID, p_UserID, p_RefundAmount, 'cancellation',
-        NOW(), p_RefundTo, 'confirmed',
-        CONCAT('Refund at ', v_RefundPercentage, '% of original fare')
-    );
-
-    -- Update passenger status
-    UPDATE Passengers
-    SET BookingStatus = 'cancelled'
-    WHERE TicketID = p_TicketID;
-
-    -- Shift RAC and WL
-    CALL sp_HandleRACandWLShifts(v_CoachType);
-
-    SET p_Status = 'Ticket cancelled and RAC/WL adjusted';
-
-    COMMIT;
-END$$
-
-DELIMITER ;
-
-
-
 
 -- OLD 
 drop procedure sp_CancelTicket;
@@ -1676,8 +1112,6 @@ select * from Coaches;
 -- Complete the coach insertion for all trains
 -- For each train, add 1A, 2A, 3A, SL (Sleeper), and GN (General) coaches
 
-desc trains;
-
 INSERT INTO Trains (TrainNumber, TrainName, TrainType) VALUES
 ('12301', 'Rajdhani Express', 'Superfast'),
 ('12002', 'Shatabdi Express', 'Shatabdi'),
@@ -1848,32 +1282,6 @@ CALL sp_CreateUser(
 );
 
 INSERT INTO TrainSchedule (TrainID, RunningDays, Status) VALUES
-(12301, 'Mon,Wed,Fri', 'active'),
-(12002, 'Tue,Thu,Sat', 'active'),
-(12259, 'Daily', 'active'),
-(12075, 'Mon-Fri', 'active'),
-(12203, 'Wed,Sat', 'active'),
-(12649, 'Daily', 'active'),
-(22435, 'Mon,Tue,Thu,Sat', 'active'),
-(82501, 'Fri,Sun', 'active'),
-(12957, 'Tue,Thu,Sun', 'active'),
-(12010, 'Mon-Sat', 'active'),
-(12931, 'Daily', 'active'),
-(12821, 'Mon,Wed,Sat', 'active'),
-(12233, 'Fri,Sun', 'active'),
-(12380, 'Tue,Thu', 'active'),
-(22121, 'Daily', 'active'),
-(12050, 'Mon,Wed,Fri', 'active'),
-(12953, 'Daily', 'active'),
-(12701, 'Tue,Thu,Sat', 'active'),
-(12657, 'Wed,Fri,Sun', 'active'),
-(12679, 'Mon-Fri', 'active');
-
-use railbook;
-show tables;
-select * from paymentdetails;
-
-INSERT INTO TrainSchedule (TrainID, RunningDays, Status) VALUES
 (1, 'Mon,Wed,Fri', 'active'),
 (2, 'Tue,Thu,Sat', 'active'),
 (3, 'Mon,Tue,Wed,Thu,Fri,Sat,Sun', 'active'),
@@ -1896,7 +1304,6 @@ INSERT INTO TrainSchedule (TrainID, RunningDays, Status) VALUES
 (20, 'Mon,Tue,Wed,Thu,Fri,Sat,Sun', 'active');
 
 select * from trainschedule;
-update trainschedule set ScheduleID = ScheduleID -1 where TrainID = 20;
 
 alter table trainstops add FOREIGN KEY (ScheduleID) REFERENCES TrainSchedule(ScheduleID);
 
@@ -2033,8 +1440,6 @@ INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, Depart
 (20, 'Bangalore', 2, '08:00:00', '08:10:00', 350),
 (20, 'Hyderabad', 3, '13:00:00', NULL, 750);
 
-drop procedure sp_TrainAvailability;
-
 DELIMITER //
 
 CREATE PROCEDURE sp_TrainAvailability(
@@ -2071,35 +1476,10 @@ select * from trainstops;
 
 -- USER INTERACTION EXAMPLES
 
-CALL sp_TrainAvailability('Delhi', 'Patna', '2025-04-14');
+CALL sp_TrainAvailability('Delhi', 'Lucknow', '2025-04-14');
 
 select * from coaches;
 
--- Set necessary OUT parameters
-SET @pnr = '';
-SET @ticket_id = 0;
-
-CALL sp_BookTicket1(
-    1,           -- UserID
-    1,                      -- TrainID
-    (SELECT ScheduleID FROM TrainSchedule WHERE TrainID = 1),
-    'Delhi',                -- FromStation
-    'Patna',                -- ToStation
-    '2025-04-14',           -- JourneyDate
-    '3A',                   -- CoachType
-    'Alice Smith',          -- Passenger Name
-    30,                     -- Age
-    'F',                    -- Gender
-    'wallet',               -- PaymentMethod (no PaymentID required for wallet)
-    NULL,                   -- PaymentID
-    @pnr,                   -- OUT: PNR
-    @ticket_id              -- OUT: TicketID
-);
-SELECT @ticket_id AS TicketID;
-
-select @pnr AS PNR;
-
-update ewallet set Balance = 2000 where UserID = 1;
 select * from ewallet;
 select * from tickets;
 select * from cancellation;
@@ -2109,23 +1489,6 @@ select * from coaches;
 select * from trains;
 select * from transactions;
 show tables;
-
-CALL sp_BookTicket1(
-    1,           -- UserID
-    1,                      -- TrainID
-    (SELECT ScheduleID FROM TrainSchedule WHERE TrainID = 1),
-    'Lucknow',                -- FromStation
-    'Patna',                -- ToStation
-    '2025-04-14',           -- JourneyDate
-    '3A',                   -- CoachType
-    'Jonson Smith',          -- Passenger Name
-    18,                     -- Age
-    'A',                    -- Gender
-    'wallet',               -- PaymentMethod (no PaymentID required for wallet)
-    NULL,                   -- PaymentID
-    @pnr,                   -- OUT: PNR
-    @ticket_id              -- OUT: TicketID
-);
 
 CALL sp_BookTicket1(
     1,           -- UserID
@@ -2149,7 +1512,6 @@ SET @status = '';
 
 SET SQL_SAFE_UPDATES = 0;
 
-select * from coaches;
 
 CALL sp_CancelTicket(
     61,             -- TicketID
@@ -2161,5 +1523,3 @@ CALL sp_CancelTicket(
 SELECT @refund_amt AS RefundAmount, @status AS RefundStatus;
 
 CALL sp_ViewUserBookings(1, 'all', NULL, NULL);
-select * from coaches;
-
