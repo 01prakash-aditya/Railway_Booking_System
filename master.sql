@@ -1062,130 +1062,111 @@ INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, Depart
 (1, 'Delhi', 1, NULL, '06:00:00', 0),
 (1, 'Kanpur', 2, '10:00:00', '10:10:00', 440),
 (1, 'Lucknow', 3, '11:30:00', '11:40:00', 510),
-(1, 'Patna', 4, '16:30:00', NULL, 990);
+(1, 'Patna', 4, '16:30:00', NULL, 990),
 
 -- Train 2
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (2, 'Mumbai', 1, NULL, '07:30:00', 0),
 (2, 'Pune', 2, '09:45:00', '09:55:00', 150),
 (2, 'Nagpur', 3, '16:00:00', '16:10:00', 850),
-(2, 'Bhopal', 4, '20:00:00', NULL, 1100);
+(2, 'Bhopal', 4, '20:00:00', NULL, 1100),
 
 -- Train 3
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (3, 'Chennai', 1, NULL, '08:30:00', 0),
 (3, 'Bangalore', 2, '12:30:00', '12:40:00', 350),
 (3, 'Hyderabad', 3, '17:30:00', '17:40:00', 650),
-(3, 'Nagpur', 4, '22:30:00', NULL, 950);
+(3, 'Nagpur', 4, '22:30:00', NULL, 950),
 
 -- Train 4
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (4, 'Kolkata', 1, NULL, '16:00:00', 0),
 (4, 'Patna', 2, '21:00:00', '21:10:00', 500),
 (4, 'Lucknow', 3, '02:00:00', '02:10:00', 900),
-(4, 'Delhi', 4, '07:00:00', NULL, 1450);
+(4, 'Delhi', 4, '07:00:00', NULL, 1450),
 
 -- Train 5
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (5, 'Bangalore', 1, NULL, '12:00:00', 0),
 (5, 'Hyderabad', 2, '16:30:00', '16:40:00', 400),
 (5, 'Nagpur', 3, '22:00:00', '22:10:00', 800),
 (5, 'Bhopal', 4, '02:00:00', '02:10:00', 1050),
-(5, 'Delhi', 5, '08:00:00', NULL, 1650);
+(5, 'Delhi', 5, '08:00:00', NULL, 1650),
 
 -- Train 6
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (6, 'Mumbai', 1, NULL, '18:00:00', 0),
 (6, 'Pune', 2, '20:00:00', '20:10:00', 150),
 (6, 'Hyderabad', 3, '04:00:00', '04:10:00', 700),
-(6, 'Chennai', 4, '12:00:00', NULL, 1250);
+(6, 'Chennai', 4, '12:00:00', NULL, 1250),
 
 -- Train 7
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (7, 'Delhi', 1, NULL, '14:00:00', 0),
 (7, 'Jaipur', 2, '18:00:00', '18:10:00', 300),
 (7, 'Ahmedabad', 3, '23:00:00', '23:10:00', 700),
-(7, 'Mumbai', 4, '07:00:00', NULL, 1200);
+(7, 'Mumbai', 4, '07:00:00', NULL, 1200),
 
 -- Train 8
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (8, 'Chennai', 1, NULL, '06:00:00', 0),
 (8, 'Bangalore', 2, '10:00:00', '10:10:00', 350),
-(8, 'Mumbai', 3, '22:00:00', NULL, 1200);
+(8, 'Mumbai', 3, '22:00:00', NULL, 1200),
 
 -- Train 9
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (9, 'Kolkata', 1, NULL, '09:00:00', 0),
 (9, 'Patna', 2, '14:00:00', '14:10:00', 500),
 (9, 'Kanpur', 3, '20:00:00', '20:10:00', 950),
-(9, 'Delhi', 4, '00:00:00', NULL, 1350);
+(9, 'Delhi', 4, '00:00:00', NULL, 1350),
 
 -- Train 10
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (10, 'Hyderabad', 1, NULL, '07:00:00', 0),
 (10, 'Nagpur', 2, '12:00:00', '12:10:00', 500),
 (10, 'Bhopal', 3, '16:00:00', '16:10:00', 750),
-(10, 'Delhi', 4, '22:00:00', NULL, 1350);
+(10, 'Delhi', 4, '22:00:00', NULL, 1350),
 
 -- Train 11
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (11, 'Delhi', 1, NULL, '15:00:00', 0),
 (11, 'Bhopal', 2, '21:00:00', '21:10:00', 600),
 (11, 'Nagpur', 3, '01:00:00', '01:10:00', 850),
-(11, 'Hyderabad', 4, '06:00:00', NULL, 1350);
+(11, 'Hyderabad', 4, '06:00:00', NULL, 1350),
 
 -- Train 12
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (12, 'Mumbai', 1, NULL, '21:00:00', 0),
 (12, 'Ahmedabad', 2, '04:00:00', '04:10:00', 500),
 (12, 'Jaipur', 3, '09:00:00', '09:10:00', 900),
-(12, 'Delhi', 4, '13:00:00', NULL, 1200);
+(12, 'Delhi', 4, '13:00:00', NULL, 1200),
 
 -- Train 13
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (13, 'Chennai', 1, NULL, '10:00:00', 0),
 (13, 'Hyderabad', 2, '15:00:00', '15:10:00', 500),
 (13, 'Nagpur', 3, '20:00:00', '20:10:00', 900),
-(13, 'Bhopal', 4, '01:00:00', NULL, 1200);
+(13, 'Bhopal', 4, '01:00:00', NULL, 1200),
 
 -- Train 14
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (14, 'Delhi', 1, NULL, '17:00:00', 0),
 (14, 'Kanpur', 2, '21:00:00', '21:10:00', 440),
-(14, 'Lucknow', 3, '23:00:00', NULL, 510);
+(14, 'Lucknow', 3, '23:00:00', NULL, 510),
 
 -- Train 15
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (15, 'Bangalore', 1, NULL, '05:00:00', 0),
-(15, 'Chennai', 2, '09:00:00', NULL, 350);
+(15, 'Chennai', 2, '09:00:00', NULL, 350),
 
 -- Train 16
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (16, 'Mumbai', 1, NULL, '20:00:00', 0),
 (16, 'Nagpur', 2, '03:00:00', '03:10:00', 850),
-(16, 'Kolkata', 3, '09:00:00', NULL, 1450);
+(16, 'Kolkata', 3, '09:00:00', NULL, 1450),
 
 -- Train 17
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (17, 'Kolkata', 1, NULL, '08:00:00', 0),
 (17, 'Patna', 2, '13:00:00', '13:10:00', 500),
-(17, 'Delhi', 3, '20:00:00', NULL, 1350);
+(17, 'Delhi', 3, '20:00:00', NULL, 1350),
 
 -- Train 18
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (18, 'Chennai', 1, NULL, '18:00:00', 0),
 (18, 'Hyderabad', 2, '22:00:00', '22:10:00', 400),
 (18, 'Nagpur', 3, '03:00:00', '03:10:00', 800),
-(18, 'Bhopal', 4, '06:00:00', NULL, 1050);
+(18, 'Bhopal', 4, '06:00:00', NULL, 1050),
 
 -- Train 19
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (19, 'Delhi', 1, NULL, '06:00:00', 0),
 (19, 'Jaipur', 2, '10:00:00', '10:10:00', 300),
-(19, 'Ahmedabad', 3, '15:00:00', NULL, 700);
+(19, 'Ahmedabad', 3, '15:00:00', NULL, 700),
 
 -- Train 20
-INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (20, 'Chennai', 1, NULL, '04:00:00', 0),
 (20, 'Bangalore', 2, '08:00:00', '08:10:00', 350),
 (20, 'Hyderabad', 3, '13:00:00', NULL, 750);
