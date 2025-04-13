@@ -472,6 +472,42 @@ DELIMITER ;
 
 DELIMITER $$
 
+-- pnr checker
+
+DELIMITER $$
+
+CREATE PROCEDURE sp_PNRStatus (
+    IN p_PNR VARCHAR(20)
+)
+BEGIN
+    SELECT 
+        t.TicketID,
+        t.PNR,
+        tr.TrainNumber,
+        tr.TrainName,
+        t.FromStation,
+        t.ToStation,
+        t.JourneyDate,
+        t.BookingDate,
+        t.TotalPassengers,
+        t.TotalFare,
+        t.BookingStatus,
+        t.PaymentMethod,
+        (SELECT GROUP_CONCAT(p.Name SEPARATOR ', ') 
+         FROM Passengers p
+         WHERE p.TicketID = t.TicketID) AS PassengerNames,
+        (SELECT GROUP_CONCAT(p.SeatAllocation SEPARATOR ', ') 
+         FROM Passengers p
+         WHERE p.TicketID = t.TicketID) AS SeatAllocations,
+        (SELECT GROUP_CONCAT(p.BookingStatus SEPARATOR ', ') 
+         FROM Passengers p
+         WHERE p.TicketID = t.TicketID) AS PassengerStatuses
+    FROM Tickets t
+    JOIN Trains tr ON t.TrainID = tr.TrainID
+    WHERE t.PNR = p_PNR;
+END$$
+
+
 CREATE PROCEDURE sp_PopulateSeatsForDate(IN p_JourneyDate DATE)
 BEGIN
     DECLARE done INT DEFAULT FALSE;
@@ -1246,7 +1282,9 @@ CALL sp_BookTicket1(
     @ticket_id              -- OUT: TicketID
 );
 
-CALL sp_CancelTicket(37, 'wallet', @refundAmount);
+CALL sp_CancelTicket(11, 'wallet', @refundAmount);
 SELECT @refundAmount;
+
+CALL sp_PNRStatus('PNR42038');
 
 CALL sp_ViewUserBookings(1, 'all', NULL, NULL);
