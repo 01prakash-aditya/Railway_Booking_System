@@ -472,42 +472,6 @@ DELIMITER ;
 
 DELIMITER $$
 
--- pnr checker
-
-DELIMITER $$
-
-CREATE PROCEDURE sp_PNRStatus (
-    IN p_PNR VARCHAR(20)
-)
-BEGIN
-    SELECT 
-        t.TicketID,
-        t.PNR,
-        tr.TrainNumber,
-        tr.TrainName,
-        t.FromStation,
-        t.ToStation,
-        t.JourneyDate,
-        t.BookingDate,
-        t.TotalPassengers,
-        t.TotalFare,
-        t.BookingStatus,
-        t.PaymentMethod,
-        (SELECT GROUP_CONCAT(p.Name SEPARATOR ', ') 
-         FROM Passengers p
-         WHERE p.TicketID = t.TicketID) AS PassengerNames,
-        (SELECT GROUP_CONCAT(p.SeatAllocation SEPARATOR ', ') 
-         FROM Passengers p
-         WHERE p.TicketID = t.TicketID) AS SeatAllocations,
-        (SELECT GROUP_CONCAT(p.BookingStatus SEPARATOR ', ') 
-         FROM Passengers p
-         WHERE p.TicketID = t.TicketID) AS PassengerStatuses
-    FROM Tickets t
-    JOIN Trains tr ON t.TrainID = tr.TrainID
-    WHERE t.PNR = p_PNR;
-END$$
-
-
 CREATE PROCEDURE sp_PopulateSeatsForDate(IN p_JourneyDate DATE)
 BEGIN
     DECLARE done INT DEFAULT FALSE;
@@ -1229,6 +1193,98 @@ INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, Depart
 CALL sp_PopulateSeatsForDate('2025-04-14');
 CALL sp_PopulateSeatsForDate('2025-04-15');
 
+-- Additional Queries
+
+DELIMITER //
+
+CREATE PROCEDURE GetWaitlistedPassengers(IN inputTrainID INT)
+BEGIN
+    SELECT p.PassengerID, p.Name, p.Age, p.Gender, p.SeatAllocation, p.BookingStatus
+    FROM passengers p
+    JOIN tickets t ON p.TicketID = t.TicketID
+    WHERE t.TrainID = inputTrainID AND p.SeatAllocation LIKE 'WL-%';
+END //
+
+DELIMITER ;
+
+DELIMITER //
+
+CREATE PROCEDURE RefundableAmountForTrainCancellation(
+    IN inputTrainID INT,
+    IN inputJourneyDate DATE
+)
+BEGIN
+    DECLARE totalRevenue DECIMAL(10,2);
+    DECLARE totalRefund DECIMAL(10,2);
+
+    -- Calculate total revenue for confirmed bookings
+    SELECT IFNULL(SUM(TotalFare), 0)
+    INTO totalRevenue
+    FROM tickets
+    WHERE TrainID = inputTrainID AND JourneyDate = inputJourneyDate;
+
+    -- Calculate sum of already refunded amount
+    SELECT IFNULL(SUM(c.RefundAmount), 0)
+    INTO totalRefund
+    FROM cancellation c
+    JOIN tickets t ON c.TicketID = t.TicketID
+    WHERE t.TrainID = inputTrainID AND t.JourneyDate = inputJourneyDate;
+
+    -- Final result
+    SELECT 
+        totalRevenue AS TotalRevenue,
+        totalRefund AS AlreadyRefunded,
+        (totalRevenue - totalRefund) AS RemainingToRefund;
+END //
+
+DELIMITER ;
+
+DELIMITER //
+
+CREATE PROCEDURE RevenueFromBookings(IN startDate DATE, IN endDate DATE)
+BEGIN
+    SELECT SUM(t.TotalFare) AS TotalRevenue
+    FROM tickets t
+    WHERE t.BookingDate BETWEEN startDate AND endDate AND t.BookingStatus = 'confirmed';
+END //
+
+DELIMITER ;
+
+DELIMITER //
+
+CREATE PROCEDURE BusiestRoute()
+BEGIN
+    SELECT t.FromStation, t.ToStation, SUM(t.TotalPassengers) AS TotalPassengers
+    FROM tickets t
+    GROUP BY t.FromStation, t.ToStation
+    ORDER BY TotalPassengers DESC
+    LIMIT 1;
+END //
+
+DELIMITER ;
+
+DELIMITER //
+
+CREATE PROCEDURE ItemizedBill(IN inputTicketID INT)
+BEGIN
+    SELECT 
+        t.TicketID,
+        t.PNR,
+        t.JourneyDate,
+        tr.TrainName,
+        c.CoachType,
+        c.BaseFare,
+        t.TotalFare,
+        (t.TotalFare - c.BaseFare * t.TotalPassengers) AS AdditionalCharges
+    FROM tickets t
+    JOIN coaches c ON t.TrainID = c.TrainID
+    JOIN trains tr ON tr.TrainID = t.TrainID
+    WHERE t.TicketID = inputTicketID
+    LIMIT 1;
+END //
+
+DELIMITER ;
+
 -- USER INTERACTION EXAMPLES
 
 SET SQL_SAFE_UPDATES = 0;
@@ -1285,6 +1341,11 @@ CALL sp_BookTicket1(
 CALL sp_CancelTicket(11, 'wallet', @refundAmount);
 SELECT @refundAmount;
 
-CALL sp_PNRStatus('PNR42038');
+CALL GetWaitlistedPassengers(1);
+CALL RefundableAmountForTrainCancellation(1, '2025-04-14');
+CALL RevenueFromBookings('2025-04-01', '2025-04-14');
+CALL BusiestRoute();
+CALL ItemizedBill(8);
 
 CALL sp_ViewUserBookings(1, 'all', NULL, NULL);
+
