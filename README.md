@@ -8,7 +8,7 @@ An SQL-based simulation of the Indian Railway Ticketing System, built with store
 The ER diagram below illustrates the database design and relationships between key tables in the system:
 
 ![ER Model](rail_er.png)
-![ER_block](ER Diagram.png)
+![ER_block](ER_Diagram.png)
 
 ## 🧾 PROJECT DESCRIPTION
 
