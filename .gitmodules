@@ -1,0 +1,3 @@
+[submodule "railways"]
+	path = railways
+	url = https://github.com/walreax/Railway-frontend
