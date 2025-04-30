@@ -1,4 +1,4 @@
-# 🚆 INDIAN RAILWAY SYSTEM
+# 🚆 RAILWAY SEAT BOOKING SYSTEM
 
 An SQL-based simulation of the Indian Railway Ticketing System, built with stored procedures, triggers, and a comprehensive relational schema to mimic real-world functionalities like booking, cancellations, wallet management, and admin control.
 
