@@ -768,7 +768,7 @@ DELIMITER ;
 
 DELIMITER $$
 
-CREATE PROCEDURE sp_CancelTicket1(
+CREATE PROCEDURE sp_CancelTicket(
     IN p_PassengerID INT,
     IN p_RefundTo VARCHAR(20),
     OUT p_RefundAmount DECIMAL(10,2)
@@ -905,140 +905,6 @@ BEGIN
 
     INSERT INTO Cancellation (TicketID, CancellationDate, RefundAmount, RefundStatus, RefundTo)
     VALUES (v_TicketID, NOW(), p_RefundAmount, 'processed', p_RefundTo);
-
-    COMMIT;
-END$$
-
-DELIMITER ;
-
-
-DELIMITER $$
-
-CREATE PROCEDURE sp_CancelTicket(
-    IN p_TicketID INT,
-    IN p_RefundTo VARCHAR(20),
-    OUT p_RefundAmount DECIMAL(10,2)
-)
-BEGIN
-    DECLARE v_UserID, v_TrainID, v_ScheduleID INT;
-    DECLARE v_JourneyDate DATE;
-    DECLARE v_CoachType, v_SeatAllocation VARCHAR(20);
-    DECLARE v_SeatNumber VARCHAR(10);
-    DECLARE v_CoachID, v_RACPassengerID, v_WLPassengerID INT;
-    DECLARE v_TotalFare DECIMAL(10,2);
-    DECLARE v_IsConfirmed, v_IsRAC INT;
-
-    START TRANSACTION;
-
-    SELECT t.UserID, t.TrainID, t.ScheduleID, t.JourneyDate, t.TotalFare,
-           p.CoachType, p.SeatAllocation,
-           IF(p.SeatAllocation LIKE CONCAT(p.CoachType, '-%'), 1, 0) AS IsConfirmed,
-           IF(p.SeatAllocation LIKE 'RAC-%', 1, 0) AS IsRAC
-    INTO v_UserID, v_TrainID, v_ScheduleID, v_JourneyDate, v_TotalFare,
-         v_CoachType, v_SeatAllocation, v_IsConfirmed, v_IsRAC
-    FROM Tickets t JOIN Passengers p ON t.TicketID = p.TicketID
-    WHERE t.TicketID = p_TicketID;
-
-    SET p_RefundAmount = v_TotalFare * 0.9;
-
-    -- Mark ticket/passenger cancelled
-    UPDATE Tickets SET BookingStatus = 'cancelled' WHERE TicketID = p_TicketID;
-    UPDATE Passengers SET BookingStatus = 'cancelled' WHERE TicketID = p_TicketID;
-
-    -- Handle confirmed seat
-    IF v_IsConfirmed = 1 THEN
-        SET v_SeatNumber = SUBSTRING_INDEX(v_SeatAllocation, '-', -1);
-        SELECT CoachID INTO v_CoachID FROM Coaches WHERE TrainID = v_TrainID AND CoachType = v_CoachType;
-
-        -- Free the seat
-        UPDATE Seats SET IsAvailable = TRUE
-        WHERE CoachID = v_CoachID AND SeatNumber = v_SeatNumber
-          AND ScheduleID = v_ScheduleID AND JourneyDate = v_JourneyDate;
-
-        -- Promote RAC-1
-        SELECT PassengerID INTO v_RACPassengerID FROM Passengers
-        WHERE BookingStatus = 'RAC' AND CoachType = v_CoachType AND SeatAllocation = 'RAC-1'
-        ORDER BY PassengerID LIMIT 1;
-
-        IF v_RACPassengerID IS NOT NULL THEN
-            UPDATE Passengers SET BookingStatus = 'confirmed',
-                SeatAllocation = CONCAT(v_CoachType, '-', v_SeatNumber)
-            WHERE PassengerID = v_RACPassengerID;
-
-            -- Shift RAC queue down
-            UPDATE Passengers
-            SET SeatAllocation = CONCAT('RAC-', CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) - 1 AS CHAR))
-            WHERE BookingStatus = 'RAC' AND CoachType = v_CoachType
-              AND CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) AS UNSIGNED) > 1;
-
-            -- Promote WL-1 to RAC-8
-            SELECT PassengerID INTO v_WLPassengerID FROM Passengers
-            WHERE BookingStatus = 'WL' AND CoachType = v_CoachType
-            ORDER BY SeatAllocation LIMIT 1;
-
-            IF v_WLPassengerID IS NOT NULL THEN
-                UPDATE Passengers SET BookingStatus = 'RAC', SeatAllocation = 'RAC-8'
-                WHERE PassengerID = v_WLPassengerID;
-
-                -- Shift WL queue
-                UPDATE Passengers
-                SET SeatAllocation = CONCAT('WL-', CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) - 1 AS CHAR))
-                WHERE BookingStatus = 'WL' AND CoachType = v_CoachType
-                  AND CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) AS UNSIGNED) > 1;
-            END IF;
-        END IF;
-    END IF;
-
-    -- Handle RAC cancellation
-    IF v_IsRAC = 1 THEN
-        SET v_CoachID = (SELECT CoachID FROM Coaches WHERE TrainID = v_TrainID AND CoachType = v_CoachType LIMIT 1);
-
-        -- Shift RAC queue down
-        UPDATE Passengers
-        SET SeatAllocation = CONCAT('RAC-', CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) - 1 AS CHAR))
-        WHERE BookingStatus = 'RAC' AND CoachType = v_CoachType
-          AND CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) AS UNSIGNED) > CAST(SUBSTRING_INDEX(v_SeatAllocation, '-', -1) AS UNSIGNED);
-
-        -- Promote WL-1 to RAC-8
-        SELECT PassengerID INTO v_WLPassengerID FROM Passengers
-        WHERE BookingStatus = 'WL' AND CoachType = v_CoachType
-        ORDER BY SeatAllocation LIMIT 1;
-
-        IF v_WLPassengerID IS NOT NULL THEN
-            UPDATE Passengers SET BookingStatus = 'RAC', SeatAllocation = 'RAC-8'
-            WHERE PassengerID = v_WLPassengerID;
-
-            -- Shift WL queue
-            UPDATE Passengers
-            SET SeatAllocation = CONCAT('WL-', CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) - 1 AS CHAR))
-            WHERE BookingStatus = 'WL' AND CoachType = v_CoachType
-              AND CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) AS UNSIGNED) > 1;
-        END IF;
-    END IF;
-    
-    -- Handle WL cancellation
-	IF v_SeatAllocation LIKE 'WL-%' THEN
-		UPDATE Passengers
-		SET SeatAllocation = CONCAT('WL-', CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) - 1 AS CHAR))
-		WHERE BookingStatus = 'WL'
-		  AND CoachType = v_CoachType
-		  AND CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) AS UNSIGNED) > 
-			  CAST(SUBSTRING_INDEX(v_SeatAllocation, '-', -1) AS UNSIGNED);
-	END IF;
-
-    -- Refund
-    IF p_RefundTo = 'wallet' THEN
-        UPDATE EWallet SET Balance = Balance + p_RefundAmount, LastUpdated = NOW()
-        WHERE UserID = v_UserID;
-    END IF;
-
-    INSERT INTO Transactions (TicketID, UserID, Amount, TransactionType, TransactionDate, PaymentMethod, PaymentStatus, Remarks)
-    VALUES (p_TicketID, v_UserID, p_RefundAmount, 'cancellation', NOW(),
-            (SELECT PaymentMethod FROM Tickets WHERE TicketID = p_TicketID),
-            'refunded', CONCAT('Refunded to ', p_RefundTo));
-
-    INSERT INTO Cancellation (TicketID, CancellationDate, RefundAmount, RefundStatus, RefundTo)
-    VALUES (p_TicketID, NOW(), p_RefundAmount, 'processed', p_RefundTo);
 
     COMMIT;
 END$$
@@ -1544,7 +1410,7 @@ CALL sp_BookTicket2(
 );
 
 
-CALL sp_CancelTicket1(2, 'wallet', @refundAmount);
+CALL sp_CancelTicket(2, 'wallet', @refundAmount);
 SELECT @refundAmount;
 
 CALL sp_ViewUserBookings(1, 'all', NULL, NULL);
