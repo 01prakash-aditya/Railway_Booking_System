@@ -10,7 +10,6 @@ DROP TABLE IF EXISTS Trains;
 DROP TABLE IF EXISTS EWallet;
 DROP TABLE IF EXISTS PaymentDetails;
 DROP TABLE IF EXISTS Users;
-
 -- -----------------------------------------------------------
 -- 1. USERS and RELATED TABLES
 -- -----------------------------------------------------------
@@ -608,6 +607,133 @@ DELIMITER ;
 
 DELIMITER $$
 
+CREATE PROCEDURE sp_BookTicket2(
+    IN p_UserID INT,
+    IN p_TrainID INT,
+    IN p_ScheduleID INT,
+    IN p_FromStation VARCHAR(50),
+    IN p_ToStation VARCHAR(50),
+    IN p_JourneyDate DATE,
+    IN p_CoachType VARCHAR(10),
+    -- Passenger 1
+    IN p_P1_Name VARCHAR(50),
+    IN p_P1_Age INT,
+    IN p_P1_Gender CHAR(1),
+    -- Passenger 2
+    IN p_P2_Name VARCHAR(50),
+    IN p_P2_Age INT,
+    IN p_P2_Gender CHAR(1),
+    IN p_PaymentMethod VARCHAR(20),
+    IN p_PaymentID INT,
+    OUT p_PNR VARCHAR(20),
+    OUT p_TicketID INT
+)
+BEGIN
+    DECLARE v_SeatNumber1, v_SeatNumber2 VARCHAR(10);
+    DECLARE v_CoachID INT;
+    DECLARE v_Fare, v_TotalFare DECIMAL(10,2);
+    DECLARE v_BookingStatus1, v_BookingStatus2 VARCHAR(20);
+    DECLARE v_SeatAllocation1, v_SeatAllocation2 VARCHAR(20);
+    DECLARE v_FromDistance, v_ToDistance, v_Distance INT;
+    DECLARE v_WalletBalance DECIMAL(10,2);
+    DECLARE v_RACCount, v_WLCount INT;
+
+    START TRANSACTION;
+
+    -- Coach and Fare
+    SELECT CoachID, BaseFare INTO v_CoachID, v_Fare
+    FROM Coaches WHERE TrainID = p_TrainID AND CoachType = p_CoachType LIMIT 1;
+
+    -- Fare Calculation
+    SELECT Distance INTO v_FromDistance FROM TrainStops WHERE ScheduleID = p_ScheduleID AND StationName = p_FromStation;
+    SELECT Distance INTO v_ToDistance FROM TrainStops WHERE ScheduleID = p_ScheduleID AND StationName = p_ToStation;
+    SET v_Distance = ABS(v_ToDistance - v_FromDistance);
+    SET v_Fare = ROUND(v_Fare * v_Distance / 100, 2);
+    SET v_TotalFare = v_Fare * 2;
+
+    -- Wallet payment
+    IF p_PaymentMethod = 'wallet' THEN
+        SELECT Balance INTO v_WalletBalance FROM EWallet WHERE UserID = p_UserID;
+        IF v_WalletBalance < v_TotalFare THEN
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Insufficient wallet balance';
+        END IF;
+        UPDATE EWallet SET Balance = Balance - v_TotalFare, LastUpdated = NOW() WHERE UserID = p_UserID;
+    END IF;
+
+    -- Allocate seat 1
+    SELECT SeatNumber INTO v_SeatNumber1 FROM Seats
+    WHERE CoachID = v_CoachID AND ScheduleID = p_ScheduleID AND JourneyDate = p_JourneyDate AND IsAvailable = TRUE
+    ORDER BY SeatNumber LIMIT 1;
+
+    IF v_SeatNumber1 IS NOT NULL THEN
+        SET v_BookingStatus1 = 'confirmed';
+        SET v_SeatAllocation1 = CONCAT(p_CoachType, '-', v_SeatNumber1);
+        UPDATE Seats SET IsAvailable = FALSE
+        WHERE CoachID = v_CoachID AND SeatNumber = v_SeatNumber1 AND ScheduleID = p_ScheduleID AND JourneyDate = p_JourneyDate;
+    ELSE
+        SELECT COUNT(*) INTO v_RACCount FROM Passengers
+        WHERE BookingStatus = 'RAC' AND CoachType = p_CoachType;
+        IF v_RACCount < 8 THEN
+            SET v_BookingStatus1 = 'RAC';
+            SET v_SeatAllocation1 = CONCAT('RAC-', v_RACCount + 1);
+        ELSE
+            SELECT COUNT(*) INTO v_WLCount FROM Passengers
+            WHERE BookingStatus = 'WL' AND CoachType = p_CoachType;
+            SET v_BookingStatus1 = 'WL';
+            SET v_SeatAllocation1 = CONCAT('WL-', v_WLCount + 1);
+        END IF;
+    END IF;
+
+    -- Allocate seat 2
+    SELECT SeatNumber INTO v_SeatNumber2 FROM Seats
+    WHERE CoachID = v_CoachID AND ScheduleID = p_ScheduleID AND JourneyDate = p_JourneyDate AND IsAvailable = TRUE
+    ORDER BY SeatNumber LIMIT 1;
+
+    IF v_SeatNumber2 IS NOT NULL THEN
+        SET v_BookingStatus2 = 'confirmed';
+        SET v_SeatAllocation2 = CONCAT(p_CoachType, '-', v_SeatNumber2);
+        UPDATE Seats SET IsAvailable = FALSE
+        WHERE CoachID = v_CoachID AND SeatNumber = v_SeatNumber2 AND ScheduleID = p_ScheduleID AND JourneyDate = p_JourneyDate;
+    ELSE
+        SELECT COUNT(*) INTO v_RACCount FROM Passengers
+        WHERE BookingStatus = 'RAC' AND CoachType = p_CoachType;
+        IF v_RACCount < 8 THEN
+            SET v_BookingStatus2 = 'RAC';
+            SET v_SeatAllocation2 = CONCAT('RAC-', v_RACCount + 1);
+        ELSE
+            SELECT COUNT(*) INTO v_WLCount FROM Passengers
+            WHERE BookingStatus = 'WL' AND CoachType = p_CoachType;
+            SET v_BookingStatus2 = 'WL';
+            SET v_SeatAllocation2 = CONCAT('WL-', v_WLCount + 1);
+        END IF;
+    END IF;
+
+    -- Insert Ticket
+    SET p_PNR = CONCAT('PNR', FLOOR(RAND() * 1000000));
+    INSERT INTO Tickets (PNR, UserID, TrainID, ScheduleID, FromStation, ToStation, BookingDate, JourneyDate,
+                         TotalPassengers, TotalFare, PaymentMethod, PaymentID, BookingStatus)
+    VALUES (p_PNR, p_UserID, p_TrainID, p_ScheduleID, p_FromStation, p_ToStation, NOW(), p_JourneyDate,
+            2, v_TotalFare, p_PaymentMethod, p_PaymentID, 'confirmed');
+
+    SET p_TicketID = LAST_INSERT_ID();
+
+    -- Insert Passengers
+    INSERT INTO Passengers (TicketID, Name, Age, Gender, CoachType, SeatAllocation, BookingStatus)
+    VALUES 
+    (p_TicketID, p_P1_Name, p_P1_Age, p_P1_Gender, p_CoachType, v_SeatAllocation1, v_BookingStatus1),
+    (p_TicketID, p_P2_Name, p_P2_Age, p_P2_Gender, p_CoachType, v_SeatAllocation2, v_BookingStatus2);
+
+    -- Transaction
+    INSERT INTO Transactions (TicketID, UserID, Amount, TransactionType, TransactionDate, PaymentMethod, PaymentStatus)
+    VALUES (p_TicketID, p_UserID, v_TotalFare, 'booking', NOW(), p_PaymentMethod, 'confirmed');
+
+    COMMIT;
+END$$
+
+DELIMITER ;
+
+DELIMITER $$
+
 CREATE PROCEDURE sp_GenerateSeats()
 BEGIN
     DECLARE done INT DEFAULT FALSE;
@@ -639,6 +765,152 @@ END$$
 DELIMITER ;
 
 -- cancel logic
+
+DELIMITER $$
+
+CREATE PROCEDURE sp_CancelTicket1(
+    IN p_PassengerID INT,
+    IN p_RefundTo VARCHAR(20),
+    OUT p_RefundAmount DECIMAL(10,2)
+)
+BEGIN
+    DECLARE v_TicketID, v_UserID, v_TrainID, v_ScheduleID INT;
+    DECLARE v_JourneyDate DATE;
+    DECLARE v_CoachType, v_SeatAllocation, v_SeatNumber VARCHAR(20);
+    DECLARE v_CoachID, v_RACPassengerID, v_WLPassengerID INT;
+    DECLARE v_TotalFare DECIMAL(10,2);
+    DECLARE v_IsConfirmed, v_IsRAC INT;
+    DECLARE v_ActivePassengerCount INT;
+
+    START TRANSACTION;
+
+    -- Get ticket and passenger info
+    SELECT p.TicketID, t.UserID, t.TrainID, t.ScheduleID, t.JourneyDate, t.TotalFare,
+           p.CoachType, p.SeatAllocation,
+           IF(p.SeatAllocation LIKE CONCAT(p.CoachType, '-%'), 1, 0) AS IsConfirmed,
+           IF(p.SeatAllocation LIKE 'RAC-%', 1, 0) AS IsRAC
+    INTO v_TicketID, v_UserID, v_TrainID, v_ScheduleID, v_JourneyDate, v_TotalFare,
+         v_CoachType, v_SeatAllocation, v_IsConfirmed, v_IsRAC
+    FROM Passengers p
+    JOIN Tickets t ON t.TicketID = p.TicketID
+    WHERE p.PassengerID = p_PassengerID;
+
+    -- Count active (non-cancelled) passengers
+    SELECT COUNT(*) INTO v_ActivePassengerCount
+    FROM Passengers
+    WHERE TicketID = v_TicketID AND BookingStatus <> 'cancelled';
+
+    -- Refund = equal share × 90%
+    SET p_RefundAmount = ROUND(v_TotalFare / v_ActivePassengerCount, 2) * 0.9;
+
+    -- Cancel this passenger
+    UPDATE Passengers SET BookingStatus = 'cancelled' WHERE PassengerID = p_PassengerID;
+
+    -- If this was the only active passenger, cancel ticket too
+    IF v_ActivePassengerCount = 1 THEN
+        UPDATE Tickets SET BookingStatus = 'cancelled' WHERE TicketID = v_TicketID;
+    END IF;
+
+    -- Confirmed seat logic
+    IF v_IsConfirmed = 1 THEN
+        SET v_SeatNumber = SUBSTRING_INDEX(v_SeatAllocation, '-', -1);
+        SELECT CoachID INTO v_CoachID FROM Coaches WHERE TrainID = v_TrainID AND CoachType = v_CoachType;
+
+        UPDATE Seats SET IsAvailable = TRUE
+        WHERE CoachID = v_CoachID AND SeatNumber = v_SeatNumber
+          AND ScheduleID = v_ScheduleID AND JourneyDate = v_JourneyDate;
+
+        -- Promote RAC-1
+        SELECT PassengerID INTO v_RACPassengerID FROM Passengers
+        WHERE BookingStatus = 'RAC' AND CoachType = v_CoachType AND SeatAllocation = 'RAC-1'
+        ORDER BY PassengerID LIMIT 1;
+
+        IF v_RACPassengerID IS NOT NULL THEN
+            UPDATE Passengers SET BookingStatus = 'confirmed',
+                   SeatAllocation = CONCAT(v_CoachType, '-', v_SeatNumber)
+            WHERE PassengerID = v_RACPassengerID;
+
+            -- Shift RAC queue
+            UPDATE Passengers
+            SET SeatAllocation = CONCAT('RAC-', CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) - 1 AS CHAR))
+            WHERE BookingStatus = 'RAC' AND CoachType = v_CoachType
+              AND CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) AS UNSIGNED) > 1;
+
+            -- Promote WL-1 to RAC-8
+            SELECT PassengerID INTO v_WLPassengerID FROM Passengers
+            WHERE BookingStatus = 'WL' AND CoachType = v_CoachType
+            ORDER BY SeatAllocation LIMIT 1;
+
+            IF v_WLPassengerID IS NOT NULL THEN
+                UPDATE Passengers SET BookingStatus = 'RAC', SeatAllocation = 'RAC-8'
+                WHERE PassengerID = v_WLPassengerID;
+
+                -- Shift WL queue
+                UPDATE Passengers
+                SET SeatAllocation = CONCAT('WL-', CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) - 1 AS CHAR))
+                WHERE BookingStatus = 'WL' AND CoachType = v_CoachType
+                  AND CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) AS UNSIGNED) > 1;
+            END IF;
+        END IF;
+    END IF;
+
+    -- RAC cancellation
+    IF v_IsRAC = 1 THEN
+        SET v_CoachID = (SELECT CoachID FROM Coaches WHERE TrainID = v_TrainID AND CoachType = v_CoachType LIMIT 1);
+
+        -- Shift RAC queue
+        UPDATE Passengers
+        SET SeatAllocation = CONCAT('RAC-', CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) - 1 AS CHAR))
+        WHERE BookingStatus = 'RAC' AND CoachType = v_CoachType
+          AND CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) AS UNSIGNED) >
+              CAST(SUBSTRING_INDEX(v_SeatAllocation, '-', -1) AS UNSIGNED);
+
+        -- Promote WL-1 to RAC-8
+        SELECT PassengerID INTO v_WLPassengerID FROM Passengers
+        WHERE BookingStatus = 'WL' AND CoachType = v_CoachType
+        ORDER BY SeatAllocation LIMIT 1;
+
+        IF v_WLPassengerID IS NOT NULL THEN
+            UPDATE Passengers SET BookingStatus = 'RAC', SeatAllocation = 'RAC-8'
+            WHERE PassengerID = v_WLPassengerID;
+
+            -- Shift WL queue
+            UPDATE Passengers
+            SET SeatAllocation = CONCAT('WL-', CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) - 1 AS CHAR))
+            WHERE BookingStatus = 'WL' AND CoachType = v_CoachType
+              AND CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) AS UNSIGNED) > 1;
+        END IF;
+    END IF;
+
+    -- WL cancellation
+    IF v_SeatAllocation LIKE 'WL-%' THEN
+        UPDATE Passengers
+        SET SeatAllocation = CONCAT('WL-', CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) - 1 AS CHAR))
+        WHERE BookingStatus = 'WL' AND CoachType = v_CoachType
+          AND CAST(SUBSTRING_INDEX(SeatAllocation, '-', -1) AS UNSIGNED) >
+              CAST(SUBSTRING_INDEX(v_SeatAllocation, '-', -1) AS UNSIGNED);
+    END IF;
+
+    -- Refund
+    IF p_RefundTo = 'wallet' THEN
+        UPDATE EWallet SET Balance = Balance + p_RefundAmount, LastUpdated = NOW()
+        WHERE UserID = v_UserID;
+    END IF;
+
+    -- Record transaction and cancellation
+    INSERT INTO Transactions (TicketID, UserID, Amount, TransactionType, TransactionDate, PaymentMethod, PaymentStatus, Remarks)
+    VALUES (v_TicketID, v_UserID, p_RefundAmount, 'cancellation', NOW(),
+            (SELECT PaymentMethod FROM Tickets WHERE TicketID = v_TicketID),
+            'refunded', CONCAT('Refunded to ', p_RefundTo));
+
+    INSERT INTO Cancellation (TicketID, CancellationDate, RefundAmount, RefundStatus, RefundTo)
+    VALUES (v_TicketID, NOW(), p_RefundAmount, 'processed', p_RefundTo);
+
+    COMMIT;
+END$$
+
+DELIMITER ;
+
 
 DELIMITER $$
 
@@ -772,7 +1044,6 @@ BEGIN
 END$$
 
 DELIMITER ;
-
 
 DELIMITER $$
 CREATE PROCEDURE sp_ViewUserBookings(
@@ -1062,209 +1333,136 @@ INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, Depart
 (1, 'Delhi', 1, NULL, '06:00:00', 0),
 (1, 'Kanpur', 2, '10:00:00', '10:10:00', 440),
 (1, 'Lucknow', 3, '11:30:00', '11:40:00', 510),
-(1, 'Patna', 4, '16:30:00', NULL, 990),
+(1, 'Patna', 4, '16:30:00', NULL, 990);
 
 -- Train 2
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (2, 'Mumbai', 1, NULL, '07:30:00', 0),
 (2, 'Pune', 2, '09:45:00', '09:55:00', 150),
 (2, 'Nagpur', 3, '16:00:00', '16:10:00', 850),
-(2, 'Bhopal', 4, '20:00:00', NULL, 1100),
+(2, 'Bhopal', 4, '20:00:00', NULL, 1100);
 
 -- Train 3
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (3, 'Chennai', 1, NULL, '08:30:00', 0),
 (3, 'Bangalore', 2, '12:30:00', '12:40:00', 350),
 (3, 'Hyderabad', 3, '17:30:00', '17:40:00', 650),
-(3, 'Nagpur', 4, '22:30:00', NULL, 950),
+(3, 'Nagpur', 4, '22:30:00', NULL, 950);
 
 -- Train 4
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (4, 'Kolkata', 1, NULL, '16:00:00', 0),
 (4, 'Patna', 2, '21:00:00', '21:10:00', 500),
 (4, 'Lucknow', 3, '02:00:00', '02:10:00', 900),
-(4, 'Delhi', 4, '07:00:00', NULL, 1450),
+(4, 'Delhi', 4, '07:00:00', NULL, 1450);
 
 -- Train 5
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (5, 'Bangalore', 1, NULL, '12:00:00', 0),
 (5, 'Hyderabad', 2, '16:30:00', '16:40:00', 400),
 (5, 'Nagpur', 3, '22:00:00', '22:10:00', 800),
 (5, 'Bhopal', 4, '02:00:00', '02:10:00', 1050),
-(5, 'Delhi', 5, '08:00:00', NULL, 1650),
+(5, 'Delhi', 5, '08:00:00', NULL, 1650);
 
 -- Train 6
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (6, 'Mumbai', 1, NULL, '18:00:00', 0),
 (6, 'Pune', 2, '20:00:00', '20:10:00', 150),
 (6, 'Hyderabad', 3, '04:00:00', '04:10:00', 700),
-(6, 'Chennai', 4, '12:00:00', NULL, 1250),
+(6, 'Chennai', 4, '12:00:00', NULL, 1250);
 
 -- Train 7
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (7, 'Delhi', 1, NULL, '14:00:00', 0),
 (7, 'Jaipur', 2, '18:00:00', '18:10:00', 300),
 (7, 'Ahmedabad', 3, '23:00:00', '23:10:00', 700),
-(7, 'Mumbai', 4, '07:00:00', NULL, 1200),
+(7, 'Mumbai', 4, '07:00:00', NULL, 1200);
 
 -- Train 8
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (8, 'Chennai', 1, NULL, '06:00:00', 0),
 (8, 'Bangalore', 2, '10:00:00', '10:10:00', 350),
-(8, 'Mumbai', 3, '22:00:00', NULL, 1200),
+(8, 'Mumbai', 3, '22:00:00', NULL, 1200);
 
 -- Train 9
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (9, 'Kolkata', 1, NULL, '09:00:00', 0),
 (9, 'Patna', 2, '14:00:00', '14:10:00', 500),
 (9, 'Kanpur', 3, '20:00:00', '20:10:00', 950),
-(9, 'Delhi', 4, '00:00:00', NULL, 1350),
+(9, 'Delhi', 4, '00:00:00', NULL, 1350);
 
 -- Train 10
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (10, 'Hyderabad', 1, NULL, '07:00:00', 0),
 (10, 'Nagpur', 2, '12:00:00', '12:10:00', 500),
 (10, 'Bhopal', 3, '16:00:00', '16:10:00', 750),
-(10, 'Delhi', 4, '22:00:00', NULL, 1350),
+(10, 'Delhi', 4, '22:00:00', NULL, 1350);
 
 -- Train 11
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (11, 'Delhi', 1, NULL, '15:00:00', 0),
 (11, 'Bhopal', 2, '21:00:00', '21:10:00', 600),
 (11, 'Nagpur', 3, '01:00:00', '01:10:00', 850),
-(11, 'Hyderabad', 4, '06:00:00', NULL, 1350),
+(11, 'Hyderabad', 4, '06:00:00', NULL, 1350);
 
 -- Train 12
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (12, 'Mumbai', 1, NULL, '21:00:00', 0),
 (12, 'Ahmedabad', 2, '04:00:00', '04:10:00', 500),
 (12, 'Jaipur', 3, '09:00:00', '09:10:00', 900),
-(12, 'Delhi', 4, '13:00:00', NULL, 1200),
+(12, 'Delhi', 4, '13:00:00', NULL, 1200);
 
 -- Train 13
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (13, 'Chennai', 1, NULL, '10:00:00', 0),
 (13, 'Hyderabad', 2, '15:00:00', '15:10:00', 500),
 (13, 'Nagpur', 3, '20:00:00', '20:10:00', 900),
-(13, 'Bhopal', 4, '01:00:00', NULL, 1200),
+(13, 'Bhopal', 4, '01:00:00', NULL, 1200);
 
 -- Train 14
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (14, 'Delhi', 1, NULL, '17:00:00', 0),
 (14, 'Kanpur', 2, '21:00:00', '21:10:00', 440),
-(14, 'Lucknow', 3, '23:00:00', NULL, 510),
+(14, 'Lucknow', 3, '23:00:00', NULL, 510);
 
 -- Train 15
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (15, 'Bangalore', 1, NULL, '05:00:00', 0),
-(15, 'Chennai', 2, '09:00:00', NULL, 350),
+(15, 'Chennai', 2, '09:00:00', NULL, 350);
 
 -- Train 16
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (16, 'Mumbai', 1, NULL, '20:00:00', 0),
 (16, 'Nagpur', 2, '03:00:00', '03:10:00', 850),
-(16, 'Kolkata', 3, '09:00:00', NULL, 1450),
+(16, 'Kolkata', 3, '09:00:00', NULL, 1450);
 
 -- Train 17
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (17, 'Kolkata', 1, NULL, '08:00:00', 0),
 (17, 'Patna', 2, '13:00:00', '13:10:00', 500),
-(17, 'Delhi', 3, '20:00:00', NULL, 1350),
+(17, 'Delhi', 3, '20:00:00', NULL, 1350);
 
 -- Train 18
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (18, 'Chennai', 1, NULL, '18:00:00', 0),
 (18, 'Hyderabad', 2, '22:00:00', '22:10:00', 400),
 (18, 'Nagpur', 3, '03:00:00', '03:10:00', 800),
-(18, 'Bhopal', 4, '06:00:00', NULL, 1050),
+(18, 'Bhopal', 4, '06:00:00', NULL, 1050);
 
 -- Train 19
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (19, 'Delhi', 1, NULL, '06:00:00', 0),
 (19, 'Jaipur', 2, '10:00:00', '10:10:00', 300),
-(19, 'Ahmedabad', 3, '15:00:00', NULL, 700),
+(19, 'Ahmedabad', 3, '15:00:00', NULL, 700);
 
 -- Train 20
+INSERT INTO TrainStops (ScheduleID, StationName, StopNumber, ArrivalTime, DepartureTime, Distance) VALUES
 (20, 'Chennai', 1, NULL, '04:00:00', 0),
 (20, 'Bangalore', 2, '08:00:00', '08:10:00', 350),
 (20, 'Hyderabad', 3, '13:00:00', NULL, 750);
 
-CALL sp_PopulateSeatsForDate('2025-04-14');
-CALL sp_PopulateSeatsForDate('2025-04-15');
-
--- Additional Queries
-
-DELIMITER //
-
-CREATE PROCEDURE GetWaitlistedPassengers(IN inputTrainID INT)
-BEGIN
-    SELECT p.PassengerID, p.Name, p.Age, p.Gender, p.SeatAllocation, p.BookingStatus
-    FROM passengers p
-    JOIN tickets t ON p.TicketID = t.TicketID
-    WHERE t.TrainID = inputTrainID AND p.SeatAllocation LIKE 'WL-%';
-END //
-
-DELIMITER ;
-
-DELIMITER //
-
-CREATE PROCEDURE RefundableAmountForTrainCancellation(
-    IN inputTrainID INT,
-    IN inputJourneyDate DATE
-)
-BEGIN
-    DECLARE totalRevenue DECIMAL(10,2);
-    DECLARE totalRefund DECIMAL(10,2);
-
-    -- Calculate total revenue for confirmed bookings
-    SELECT IFNULL(SUM(TotalFare), 0)
-    INTO totalRevenue
-    FROM tickets
-    WHERE TrainID = inputTrainID AND JourneyDate = inputJourneyDate;
-
-    -- Calculate sum of already refunded amount
-    SELECT IFNULL(SUM(c.RefundAmount), 0)
-    INTO totalRefund
-    FROM cancellation c
-    JOIN tickets t ON c.TicketID = t.TicketID
-    WHERE t.TrainID = inputTrainID AND t.JourneyDate = inputJourneyDate;
-
-    -- Final result
-    SELECT 
-        totalRevenue AS TotalRevenue,
-        totalRefund AS AlreadyRefunded,
-        (totalRevenue - totalRefund) AS RemainingToRefund;
-END //
-
-DELIMITER ;
-
-DELIMITER //
-
-CREATE PROCEDURE RevenueFromBookings(IN startDate DATE, IN endDate DATE)
-BEGIN
-    SELECT SUM(t.TotalFare) AS TotalRevenue
-    FROM tickets t
-    WHERE t.BookingDate BETWEEN startDate AND endDate AND t.BookingStatus = 'confirmed';
-END //
-
-DELIMITER ;
-
-DELIMITER //
-
-CREATE PROCEDURE BusiestRoute()
-BEGIN
-    SELECT t.FromStation, t.ToStation, SUM(t.TotalPassengers) AS TotalPassengers
-    FROM tickets t
-    GROUP BY t.FromStation, t.ToStation
-    ORDER BY TotalPassengers DESC
-    LIMIT 1;
-END //
-
-DELIMITER ;
-
-DELIMITER //
-
-CREATE PROCEDURE ItemizedBill(IN inputTicketID INT)
-BEGIN
-    SELECT 
-        t.TicketID,
-        t.PNR,
-        t.JourneyDate,
-        tr.TrainName,
-        c.CoachType,
-        c.BaseFare,
-        t.TotalFare,
-        (t.TotalFare - c.BaseFare * t.TotalPassengers) AS AdditionalCharges
-    FROM tickets t
-    JOIN coaches c ON t.TrainID = c.TrainID
-    JOIN trains tr ON tr.TrainID = t.TrainID
-    WHERE t.TicketID = inputTicketID
-    LIMIT 1;
-END //
-
-DELIMITER ;
+CALL sp_PopulateSeatsForDate('2025-04-30');
+CALL sp_PopulateSeatsForDate('2025-05-01');
 
 -- USER INTERACTION EXAMPLES
 
@@ -1286,7 +1484,7 @@ CALL sp_CreateUser(
 
 CALL sp_walletoperation(1,4000,'add',@output);
 
-CALL sp_TrainAvailability('Delhi', 'Patna', '2025-04-14');
+CALL sp_TrainAvailability('Delhi', 'Patna', '2025-04-30');
 
 select * from users;
 select * from paymentdetails;
@@ -1319,14 +1517,34 @@ CALL sp_BookTicket1(
     @ticket_id              -- OUT: TicketID
 );
 
-CALL sp_CancelTicket(11, 'wallet', @refundAmount);
+CALL sp_BookTicket2(
+    1,                  -- p_UserID
+    1,               -- p_TrainID
+    (SELECT ScheduleID FROM TrainSchedule WHERE TrainID = 1),          
+    'Delhi',            -- p_FromStation
+    'Patna',           -- p_ToStation
+    '2025-04-30',       -- p_JourneyDate
+    '1A',               -- p_CoachType
+
+    -- Passenger 1
+    'Alice Kumar',      -- p_P1_Name
+    28,                 -- p_P1_Age
+    'F',                -- p_P1_Gender
+
+    -- Passenger 2
+    'Rohan Verma',      -- p_P2_Name
+    32,                 -- p_P2_Age
+    'M',                -- p_P2_Gender
+
+    'wallet',           -- p_PaymentMethod
+    NULL,               -- p_PaymentID (can be NULL for wallet)
+
+    @pnr,               -- OUT: p_PNR
+    @ticket_id          -- OUT: p_TicketID
+);
+
+
+CALL sp_CancelTicket1(2, 'wallet', @refundAmount);
 SELECT @refundAmount;
 
-CALL GetWaitlistedPassengers(1);
-CALL RefundableAmountForTrainCancellation(1, '2025-04-14');
-CALL RevenueFromBookings('2025-04-01', '2025-04-14');
-CALL BusiestRoute();
-CALL ItemizedBill(8);
-
 CALL sp_ViewUserBookings(1, 'all', NULL, NULL);
-
