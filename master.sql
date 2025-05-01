@@ -1,4 +1,4 @@
--- Drop tables if they exist (order matters due to foreign key constraints)
+git checkout maingit checkout main-- Drop tables if they exist (order matters due to foreign key constraints)
 DROP TABLE IF EXISTS Cancellation;
 DROP TABLE IF EXISTS Transactions;
 DROP TABLE IF EXISTS Passengers;
