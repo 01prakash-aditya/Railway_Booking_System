@@ -1,134 +1,136 @@
-# 🚆 RAILWAY SEAT BOOKING SYSTEM
+# Railway Reservation System
 
-An SQL-based simulation of the Indian Railway Ticketing System, built with stored procedures, triggers, and a comprehensive relational schema to mimic real-world functionalities like booking, cancellations, wallet management, and admin control.
+A comprehensive simulation of the Indian Railway Ticketing System built with MySQL, featuring stored procedures, triggers, and a relational database schema to implement real-world functionalities including reservations, cancellations, payment processing, and administrative controls.
 
+## Entity-Relationship (ER) Model
 
-## 🧩 Entity-Relationship (ER) Model
-
-The ER diagram below illustrates the database design and relationships between key tables in the system:
+The diagram below illustrates the database design and relationships between entities in the system:
 
 ![ER Model](rail_er.png)
 
-## 🧾 PROJECT DESCRIPTION
+## Project Overview
 
-This project replicates the Indian Railways' booking infrastructure. It features:
+This project implements a digital replica of the Indian Railways' reservation infrastructure with the following features:
 
-- User registration, authentication, and wallet-based transactions
-- Train search, seat booking with RAC/WL management
-- Automatic seat promotion on cancellations
-- Admin operations for populating and managing train data
-
----
-
-## 📦 SETUP INSTRUCTIONS
-
-1. *Database Setup*:  
-   Execute the SQL scripts (train.docx contents) in your MySQL Workbench or CLI to create all tables, triggers, and procedures.
-
-2. *Initial Train Data*:  
-   Train and coach data are inserted as part of the setup. You can use CALL sp_PopulateSeatsForDate('YYYY-MM-DD'); to generate daily seat data.
+- User account management with secure authentication
+- Electronic wallet for seamless transactions
+- Advanced train search functionality
+- Reservation system with automatic seat allocation
+- Support for RAC (Reservation Against Cancellation) and Waitlist management
+- Dynamic seat promotion upon cancellations
+- Administrative interface for system management
 
 ---
 
-## 👤 USER FUNCTIONS
+## Setup Instructions
 
-| Feature                        | Procedure               | Description                                                  |
-|-------------------------------|--------------------------|--------------------------------------------------------------|
-| Register New User             | sp_CreateUser         | Create user and insert payment details                       |
-| Login                         | sp_UserLogin          | Authenticate user using username + DOB (as password)         |
-| Add Payment Method            | sp_AddPaymentMethod   | Add card or UPI credentials                                  |
-| Load Wallet                   | sp_WalletOperation    | Use with operation = 'add' to load balance                 |
-| Search Trains                 | sp_SearchTrains       | Search trains between stations on a date                     |
-| Check Train Availability      | sp_TrainAvailability  | View timing, schedule, and stops                             |
-| Book Ticket                   | sp_BookTicket1        | Book seat; auto-assigns Confirmed, RAC or WL                 |
-| View Bookings                 | sp_ViewUserBookings   | Filter by status and journey date                            |
-| Check PNR Status              | (use Tickets table)   | Check via PNR column in Tickets                          |
-| Cancel Ticket                 | sp_CancelTicket       | Auto-promotes RAC/WL and refunds to wallet or original method |
-| Logout                        | sp_UserLogout         | Dummy call for session end                                   |
+1. **Database Initialization**:
+   - Execute the SQL scripts in MySQL Workbench or command-line interface to create the database schema, including tables, triggers, and stored procedures.
 
-> *Note*:
-> - Refunds: 90% of fare refunded on cancellation  
-> - RAC → Confirmed and WL → RAC on cancellations  
-> - Ensure wallet balance is sufficient before booking
+2. **Data Population**:
+   - Initial train and coach data are included in the setup scripts.
+   - Generate daily seat inventory using: `CALL sp_PopulateSeatsForDate('YYYY-MM-DD');`
 
 ---
 
-## 🛠 ADMINISTRATOR PANEL
+## User Functionality
 
-| Task                            | SQL / Procedure                 | Description                                        |
-|---------------------------------|----------------------------------|----------------------------------------------------|
-| Generate Seats for Today       | CALL sp_GenerateSeats();      | Creates default seat layout for all coaches        |
-| Populate Seats for a Date      | CALL sp_PopulateSeatsForDate('YYYY-MM-DD'); | Create seat entries for future dates              |
-| Add New Train / Schedule       | INSERT INTO Trains ... etc.   | Add entries to Trains, TrainSchedule, etc.     |
-| View All Tickets               | SELECT * FROM Tickets;        | View every booking                                 |
-| View All Passengers            | SELECT * FROM Passengers;     | Individual passenger details                       |
-| View All Transactions          | SELECT * FROM Transactions;   | Payment and refund history                         |
-| View Wallets and Balances      | SELECT * FROM EWallet;        | Track wallet balance per user                      |
-| View Cancellations             | SELECT * FROM Cancellation;   | Check refund info and cancellation logs            |
+| Feature | Procedure | Description |
+|---------|-----------|-------------|
+| Account Registration | sp_CreateUser | Creates a new user account and associated payment details |
+| Authentication | sp_UserLogin | Authenticates users with credentials |
+| Payment Method Registration | sp_AddPaymentMethod | Registers card or UPI payment methods |
+| Wallet Management | sp_WalletOperation | Manages wallet balance (add funds) |
+| Train Search | sp_SearchTrains | Searches available trains between stations for a specific date |
+| Availability Check | sp_TrainAvailability | Displays train schedule, timing, and stops |
+| Ticket Booking | sp_BookTicket1 | Books seats with automatic allocation to Confirmed, RAC, or Waitlist |
+| Booking History | sp_ViewUserBookings | Views bookings filtered by status and travel date |
+| PNR Status | Tickets table query | Retrieves booking status via PNR |
+| Cancellation | sp_CancelTicket | Processes cancellations with automatic seat reallocation and refunds |
+| Session Management | sp_UserLogout | Terminates user session |
 
----
-
-## ⚙ INTERNAL LOGIC (Triggers)
-
-- trg_create_ewallet: Creates a wallet when user registers
-- trg_process_refund: Auto-refunds wallet on cancellation
-- trg_wallet_payment: Deducts from wallet during booking
-- trg_update_passenger_status: Marks passengers as cancelled when ticket is cancelled
-
----
-
-## 🧭 HOW TO USE (User Journey)
-
-1. Register a new user using sp_CreateUser
-2. Add funds using sp_WalletOperation
-3. Search trains with sp_SearchTrains
-4. Check stops and timings using sp_TrainAvailability
-5. Book using sp_BookTicket1
-6. View your tickets with sp_ViewUserBookings
-7. Cancel using sp_CancelTicket if needed
+> **Notes**:
+>
+> - Cancellation policy: 90% of fare is refunded
+> - Seat allocation automatically promotes RAC to Confirmed and Waitlist to RAC upon cancellations
+> - Sufficient wallet balance is required for booking transactions
 
 ---
 
-🔍 Stored Procedures 
-ListPassengersOnTrain(trainID, journeyDate)
-→ Lists all passengers booked on a specific train for a given journey date.
+## Administrative Functions
 
-GetWaitlistedPassengers(trainID)
-→ Retrieves all waitlisted passengers for the specified train.
-
-RefundableAmountForTrainCancellation(trainID, journeyDate)
-→ Calculates refundable amount as: total revenue minus refunded amount for that train on a given date.
-
-RevenueFromBookings(startDate, endDate)
-→ Returns total ticket booking revenue generated within the specified date range.
-
-BusiestRoute()
-→ Finds the most traveled route (FromStation → ToStation) based on total passenger count.
-
-ItemizedBill(ticketID)
-→ Generates a bill for the ticket showing base fare and additional charges breakdown.
+| Function | Implementation | Description |
+|----------|----------------|-------------|
+| Daily Seat Generation | CALL sp_GenerateSeats(); | Creates seat inventory for all coaches |
+| Scheduled Seat Creation | CALL sp_PopulateSeatsForDate('YYYY-MM-DD'); | Prepares seat inventory for future dates |
+| Train Management | SQL INSERT statements | Adds or modifies train details and schedules |
+| Reservation Monitoring | SELECT * FROM Tickets; | Views all booking records |
+| Passenger Management | SELECT * FROM Passengers; | Retrieves passenger details |
+| Transaction Records | SELECT * FROM Transactions; | Monitors payment and refund history |
+| Financial Oversight | SELECT * FROM EWallet; | Tracks user wallet balances |
+| Cancellation Tracking | SELECT * FROM Cancellation; | Reviews cancellation data and refund processing |
 
 ---
 
-## 🔮 FUTURE IMPROVEMENTS
+## System Architecture (Triggers)
 
-- ✅ Multi-passenger ticket booking support
-- ✅ Email/SMS simulation for PNR alerts
-- ⏳ Auto-scheduling of seats for future days via scheduler event
-- ❌ Authentication with encrypted password support (currently DOB-based)
-- 📈 Admin dashboard (GUI/Web or CLI-based)
-- 📦 Integration with live train data APIs (IRCTC/NTES)
-- 🧠 AI-assisted dynamic pricing (e.g., surge fare, route popularity)
-- 🔐 Session-based authentication & token management
+- **trg_create_ewallet**: Automatically creates a wallet for new user registrations
+- **trg_process_refund**: Processes refunds to wallet upon ticket cancellation
+- **trg_wallet_payment**: Manages wallet balance deduction during booking
+- **trg_update_passenger_status**: Updates passenger status during cancellation
 
 ---
 
-## 📄 LICENSE
+## Usage Guide
 
-This project is free to use for educational purposes.
+1. Register an account using `sp_CreateUser`
+2. Add funds to wallet using `sp_WalletOperation`
+3. Search for available trains with `sp_SearchTrains`
+4. Review train details with `sp_TrainAvailability`
+5. Book tickets using `sp_BookTicket1`
+6. View bookings with `sp_ViewUserBookings`
+7. Cancel reservations if needed with `sp_CancelTicket`
 
 ---
-## GH REPO
 
-[GIT HUB REPO FOR THIS PROJECT](https://github.com/01prakash-aditya/Railway_Booking_System)
+## Advanced Analytics
 
+- **ListPassengersOnTrain(trainID, journeyDate)**: Generates passenger manifest for specific trains
+- **GetWaitlistedPassengers(trainID)**: Retrieves waitlist information for capacity planning
+- **RefundableAmountForTrainCancellation(trainID, journeyDate)**: Calculates financial impact of train cancellations
+- **RevenueFromBookings(startDate, endDate)**: Provides revenue analytics for specified periods
+- **BusiestRoute()**: Identifies high-traffic routes based on passenger volume
+- **ItemizedBill(ticketID)**: Generates detailed fare breakdown for tickets
+
+---
+
+## Development Roadmap
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Multi-passenger Booking | ✅ Implemented | Support for booking multiple passengers on a single ticket |
+| Notification System | ✅ Implemented | Simulated alerts for booking and PNR status updates |
+| Automated Scheduling | ⏳ In Progress | Automatic seat inventory generation for future dates |
+| Enhanced Authentication | ❌ Planned | Secure password encryption (replacing DOB-based authentication) |
+| Administrative Dashboard | 📈 Planned | Graphical interface for system management |
+| External API Integration | 📦 Planned | Connection with live train data services |
+| Dynamic Pricing Model | 🧠 Planned | Intelligent fare calculation based on demand and route popularity |
+| Session Management | 🔐 Planned | Token-based authentication with session control |
+
+---
+
+## License
+
+This project is available for educational purposes under the MIT License.
+
+## Application Interface
+
+![Landing Page](images/README/1746043154535.png)
+
+![Booking Interface](images/README/1746043579246.png)
+![User Dashboard](images/README/1746043584916.png)
+![Payment Processing](images/README/1746043591261.png)
+
+## Repository
+
+[GitHub Repository](https://github.com/01prakash-aditya/Railway_Booking_System)
